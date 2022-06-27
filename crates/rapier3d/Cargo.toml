@@ -65,3 +65,9 @@ bitflags = "1"
 [dev-dependencies]
 bincode = "1"
 serde = { version = "1", features = [ "derive" ] }
+
+[profile.release]
+debug = false
+codegen-units = 1
+lto = true
+opt-level = 3

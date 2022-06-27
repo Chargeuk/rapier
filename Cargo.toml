@@ -23,16 +23,27 @@ resolver = "2"
 #parry3d-f64 = { git = "https://github.com/dimforge/parry", branch = "master" }
 
 [profile.release]
-#debug = true
-#codegen-units = 1
-#lto = true
+debug = false
+codegen-units = 1
+lto = true
+opt-level = 3
 
 [profile.dev]
 opt-level = 1
 
 
-#[profile.dev.package.rapier3d]
-#opt-level = 3
+[profile.dev.package.rapier3d]
+debug = false
+codegen-units = 1
+lto = true
+opt-level = 3
+
+[profile.dev.package.rapier2d]
+debug = false
+codegen-units = 1
+lto = true
+opt-level = 3
+
 #
 #[profile.dev.package.kiss3d]
 #opt-level = 3
