@@ -35,13 +35,13 @@ opt-level = 1
 [profile.dev.package.rapier3d]
 debug = false
 codegen-units = 1
-lto = true
+# lto = true
 opt-level = 3
 
 [profile.dev.package.rapier2d]
 debug = false
 codegen-units = 1
-lto = true
+# lto = true
 opt-level = 3
 
 #

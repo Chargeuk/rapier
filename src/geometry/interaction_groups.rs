@@ -21,25 +21,35 @@ pub struct InteractionGroups {
     pub memberships: u32,
     /// Groups filter.
     pub filter: u32,
+    /// bitwise set of groups that this collider belongs to for additional filtering within the same belongsToGrouping
+    pub belongs_to_with_grouping: u32,
+    /// bitwise set of groups that this collider collides with for additional filtering within the same belongsToGrouping
+    pub collides_with_with_grouping: u32,
+    /// the group this collider belongs to
+    pub belongs_to_grouping: u32,
 }
 
 impl InteractionGroups {
     /// Initializes with the given interaction groups and interaction mask.
-    pub const fn new(memberships: u32, filter: u32) -> Self {
+    pub const fn new(memberships: u32, filter: u32,
+        belongs_to_with_grouping: u32, collides_with_with_grouping: u32, belongs_to_grouping: u32) -> Self {
         Self {
             memberships,
             filter,
+            belongs_to_with_grouping,
+            collides_with_with_grouping,
+            belongs_to_grouping
         }
     }
 
     /// Allow interaction with everything.
     pub const fn all() -> Self {
-        Self::new(u32::MAX, u32::MAX)
+        Self::new(u32::MAX, u32::MAX, u32::MAX, u32::MAX, u32::MAX)
     }
 
     /// Prevent all interactions.
     pub const fn none() -> Self {
-        Self::new(0, 0)
+        Self::new(0, 0, 0, 0, 0)
     }
 
     /// Sets the group this filter is part of.
@@ -60,7 +70,15 @@ impl InteractionGroups {
     /// with the filter of `rhs`, and vice-versa.
     #[inline]
     pub const fn test(self, rhs: Self) -> bool {
+        // global filter flags say yes
         (self.memberships & rhs.filter) != 0 && (rhs.memberships & self.filter) != 0
+        // And in different grouping
+        && (self.belongs_to_grouping != rhs.belongs_to_grouping
+            // Or same grouping and grouping flags say yes
+            || (self.belongs_to_grouping == rhs.belongs_to_grouping  
+                && (self.belongs_to_with_grouping & rhs.collides_with_with_grouping) != 0
+                && (rhs.belongs_to_with_grouping & self.collides_with_with_grouping) != 0)
+           )
     }
 }
 

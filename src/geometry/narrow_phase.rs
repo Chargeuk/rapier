@@ -668,7 +668,7 @@ impl NarrowPhase {
         bodies: &RigidBodySet,
         colliders: &ColliderSet,
         modified_colliders: &[ColliderHandle],
-        hooks: &dyn PhysicsHooks,
+        _hooks: &dyn PhysicsHooks,
         events: &dyn EventHandler,
     ) {
         if modified_colliders.is_empty() {
@@ -721,24 +721,24 @@ impl NarrowPhase {
                     break 'emit_events;
                 }
 
-                let active_hooks = co1.flags.active_hooks | co2.flags.active_hooks;
+                // let active_hooks = co1.flags.active_hooks | co2.flags.active_hooks;
 
-                if active_hooks.contains(ActiveHooks::FILTER_INTERSECTION_PAIR) {
-                    let context = PairFilterContext {
-                        bodies,
-                        colliders,
-                        rigid_body1: co1.parent.map(|p| p.handle),
-                        rigid_body2: co2.parent.map(|p| p.handle),
-                        collider1: handle1,
-                        collider2: handle2,
-                    };
+                // if active_hooks.contains(ActiveHooks::FILTER_INTERSECTION_PAIR) {
+                //     let context = PairFilterContext {
+                //         bodies,
+                //         colliders,
+                //         rigid_body1: co1.parent.map(|p| p.handle),
+                //         rigid_body2: co2.parent.map(|p| p.handle),
+                //         collider1: handle1,
+                //         collider2: handle2,
+                //     };
 
-                    if !hooks.filter_intersection_pair(&context) {
-                        // No intersection allowed.
-                        edge.weight.intersecting = false;
-                        break 'emit_events;
-                    }
-                }
+                //     if !hooks.filter_intersection_pair(&context) {
+                //         // No intersection allowed.
+                //         edge.weight.intersecting = false;
+                //         break 'emit_events;
+                //     }
+                // }
 
                 let pos12 = co1.pos.inv_mul(&co2.pos);
                 edge.weight.intersecting = query_dispatcher
@@ -822,26 +822,28 @@ impl NarrowPhase {
 
                 let active_hooks = co1.flags.active_hooks | co2.flags.active_hooks;
 
-                let mut solver_flags = if active_hooks.contains(ActiveHooks::FILTER_CONTACT_PAIRS) {
-                    let context = PairFilterContext {
-                        bodies,
-                        colliders,
-                        rigid_body1: co1.parent.map(|p| p.handle),
-                        rigid_body2: co2.parent.map(|p| p.handle),
-                        collider1: pair.collider1,
-                        collider2: pair.collider2,
-                    };
+                // let mut solver_flags = if active_hooks.contains(ActiveHooks::FILTER_CONTACT_PAIRS) {
+                //     let context = PairFilterContext {
+                //         bodies,
+                //         colliders,
+                //         rigid_body1: co1.parent.map(|p| p.handle),
+                //         rigid_body2: co2.parent.map(|p| p.handle),
+                //         collider1: pair.collider1,
+                //         collider2: pair.collider2,
+                //     };
 
-                    if let Some(solver_flags) = hooks.filter_contact_pair(&context) {
-                        solver_flags
-                    } else {
-                        // No contact allowed.
-                        pair.clear();
-                        break 'emit_events;
-                    }
-                } else {
-                    SolverFlags::default()
-                };
+                //     if let Some(solver_flags) = hooks.filter_contact_pair(&context) {
+                //         solver_flags
+                //     } else {
+                //         // No contact allowed.
+                //         pair.clear();
+                //         break 'emit_events;
+                //     }
+                // } else {
+                //     SolverFlags::default()
+                // };
+
+                let mut solver_flags = SolverFlags::default();
 
                 if !co1.flags.solver_groups.test(co2.flags.solver_groups) {
                     solver_flags.remove(SolverFlags::COMPUTE_IMPULSES);
