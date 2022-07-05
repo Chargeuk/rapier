@@ -1,21 +1,23 @@
 #[cfg(feature = "parallel")]
 use rayon::prelude::*;
 
+use crate::data::graph::EdgeIndex;
 use crate::data::Coarena;
 use crate::dynamics::{
-    CoefficientCombineRule, IslandManager, RigidBodyDominance, RigidBodySet, RigidBodyType,
+    CoefficientCombineRule, ImpulseJointSet, IslandManager, RigidBodyDominance, RigidBodySet,
+    RigidBodyType,
 };
 use crate::geometry::{
     BroadPhasePairEvent, ColliderChanges, ColliderGraphIndex, ColliderHandle, ColliderPair,
     ColliderSet, CollisionEvent, ContactData, ContactManifold, ContactManifoldData, ContactPair,
-    InteractionGraph, IntersectionPair, SolverContact, SolverFlags,
+    InteractionGraph, IntersectionPair, SolverContact, SolverFlags, TemporaryInteractionIndex,
 };
 use crate::math::{Real, Vector};
 use crate::pipeline::{
     ActiveEvents, ActiveHooks, ContactModificationContext, EventHandler, PairFilterContext,
     PhysicsHooks,
 };
-use crate::prelude::CollisionEventFlags;
+use crate::prelude::{CollisionEventFlags, MultibodyJointSet};
 use parry::query::{DefaultQueryDispatcher, PersistentQueryDispatcher};
 use parry::utils::IsometryOpt;
 use std::collections::HashMap;
@@ -162,6 +164,11 @@ impl NarrowPhase {
                     .interactions_with(id)
                     .map(|e| (e.0, e.1, e.2.intersecting))
             })
+    }
+
+    /// Returns the contact pair at the given temporary index.
+    pub fn contact_pair_at_index(&self, id: TemporaryInteractionIndex) -> &ContactPair {
+        &self.contact_graph.graph.edges[id.index()].weight
     }
 
     /// The contact pair involving two specific colliders.
@@ -768,6 +775,8 @@ impl NarrowPhase {
         prediction_distance: Real,
         bodies: &RigidBodySet,
         colliders: &ColliderSet,
+        impulse_joints: &ImpulseJointSet,
+        multibody_joints: &MultibodyJointSet,
         modified_colliders: &[ColliderHandle],
         hooks: &dyn PhysicsHooks,
         events: &dyn EventHandler,
@@ -804,6 +813,27 @@ impl NarrowPhase {
 
                 if let Some(co_parent2) = &co2.parent {
                     rb_type2 = bodies[co_parent2.handle].body_type;
+                }
+
+                // Deal with contacts disabled between bodies attached by joints.
+                if let (Some(co_parent1), Some(co_parent2)) = (&co1.parent, &co2.parent) {
+                    for (_, joint) in
+                        impulse_joints.joints_between(co_parent1.handle, co_parent2.handle)
+                    {
+                        if !joint.data.contacts_enabled {
+                            pair.clear();
+                            break 'emit_events;
+                        }
+                    }
+
+                    if let Some((_, _, mb_link)) =
+                        multibody_joints.joint_between(co_parent1.handle, co_parent2.handle)
+                    {
+                        if !mb_link.joint.data.contacts_enabled {
+                            pair.clear();
+                            break 'emit_events;
+                        }
+                    }
                 }
 
                 // Filter based on the rigid-body types.
@@ -977,6 +1007,7 @@ impl NarrowPhase {
         &'a mut self,
         islands: &IslandManager,
         bodies: &RigidBodySet,
+        out_contact_pairs: &mut Vec<TemporaryInteractionIndex>,
         out_manifolds: &mut Vec<&'a mut ContactManifold>,
         out: &mut Vec<Vec<ContactManifoldIndex>>,
     ) {
@@ -985,7 +1016,9 @@ impl NarrowPhase {
         }
 
         // TODO: don't iterate through all the interactions.
-        for inter in self.contact_graph.graph.edges.iter_mut() {
+        for (pair_id, inter) in self.contact_graph.graph.edges.iter_mut().enumerate() {
+            let mut push_pair = false;
+
             for manifold in &mut inter.weight.manifolds {
                 if manifold
                     .data
@@ -1029,8 +1062,13 @@ impl NarrowPhase {
 
                         out[island_index].push(out_manifolds.len());
                         out_manifolds.push(manifold);
+                        push_pair = true;
                     }
                 }
+            }
+
+            if push_pair {
+                out_contact_pairs.push(EdgeIndex::new(pair_id as u32));
             }
         }
     }

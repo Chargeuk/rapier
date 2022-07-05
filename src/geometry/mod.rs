@@ -16,6 +16,8 @@ pub use self::collider_set::ColliderSet;
 
 pub use parry::query::TrackedContact;
 
+use crate::math::{Real, Vector};
+
 /// A contact between two colliders.
 pub type Contact = parry::query::TrackedContact<ContactData>;
 /// A contact manifold between two colliders.
@@ -113,6 +115,63 @@ impl CollisionEvent {
                 f.contains(CollisionEventFlags::REMOVED)
             }
         }
+    }
+}
+
+#[derive(Copy, Clone, PartialEq, Debug, Default)]
+/// Event occurring when the sum of the magnitudes of the contact forces
+/// between two colliders exceed a threshold.
+pub struct ContactForceEvent {
+    /// The first collider involved in the contact.
+    pub collider1: ColliderHandle,
+    /// The second collider involved in the contact.
+    pub collider2: ColliderHandle,
+    /// The sum of all the forces between the two colliders.
+    pub total_force: Vector<Real>,
+    /// The sum of the magnitudes of each force between the two colliders.
+    ///
+    /// Note that this is **not** the same as the magnitude of `self.total_force`.
+    /// Here we are summing the magnitude of all the forces, instead of taking
+    /// the magnitude of their sum.
+    pub total_force_magnitude: Real,
+    /// The world-space (unit) direction of the force with strongest magnitude.
+    pub max_force_direction: Vector<Real>,
+    /// The magnitude of the largest force at a contact point of this contact pair.
+    pub max_force_magnitude: Real,
+}
+
+impl ContactForceEvent {
+    /// Init a contact force event from a contact pair.
+    pub fn from_contact_pair(dt: Real, pair: &ContactPair, total_force_magnitude: Real) -> Self {
+        let mut result = ContactForceEvent {
+            collider1: pair.collider1,
+            collider2: pair.collider2,
+            total_force_magnitude,
+            ..ContactForceEvent::default()
+        };
+
+        for m in &pair.manifolds {
+            let mut total_manifold_impulse = 0.0;
+            for pt in m.contacts() {
+                total_manifold_impulse += pt.data.impulse;
+
+                if pt.data.impulse > result.max_force_magnitude {
+                    result.max_force_magnitude = pt.data.impulse;
+                    result.max_force_direction = m.data.normal;
+                }
+            }
+
+            result.total_force += m.data.normal * total_manifold_impulse;
+        }
+
+        let inv_dt = crate::utils::inv(dt);
+        // NOTE: convert impulses to forces. Note that we
+        //       don’t need to convert the `total_force_magnitude`
+        //       because it’s an input of this function already
+        //       assumed to be a force instead of an impulse.
+        result.total_force *= inv_dt;
+        result.max_force_magnitude *= inv_dt;
+        result
     }
 }
 
