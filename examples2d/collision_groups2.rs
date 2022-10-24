@@ -24,8 +24,8 @@ pub fn init_world(testbed: &mut Testbed) {
     /*
      * Setup groups
      */
-    const GREEN_GROUP: InteractionGroups = InteractionGroups::new(0b01, 0b01, u32::MAX, u32::MAX, u32::MAX);
-    const BLUE_GROUP: InteractionGroups = InteractionGroups::new(0b10, 0b10, u32::MAX, u32::MAX, u32::MAX);
+    const GREEN_GROUP: InteractionGroups = InteractionGroups::new(Group::GROUP_1, Group::GROUP_1, u32::MAX, u32::MAX, u32::MAX);
+    const BLUE_GROUP: InteractionGroups = InteractionGroups::new(Group::GROUP_2, Group::GROUP_2, u32::MAX, u32::MAX, u32::MAX);
 
     /*
      * A green floor that will collide with the GREEN group only.
