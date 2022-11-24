@@ -14,7 +14,7 @@ use crate::geometry::{
 };
 use crate::math::{Real, Vector};
 use crate::pipeline::{
-    ActiveEvents, ActiveHooks, ContactModificationContext, EventHandler, PairFilterContext,
+    ActiveEvents, ActiveHooks, ContactModificationContext, EventHandler,
     PhysicsHooks,
 };
 use crate::prelude::{CollisionEventFlags, MultibodyJointSet};
