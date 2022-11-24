@@ -1,14 +1,18 @@
 use crate::dynamics::RigidBodySet;
-use crate::geometry::{ColliderSet, CollisionEvent, ContactPair};
+use crate::geometry::{ColliderSet, CollisionEvent, ContactForceEvent, ContactPair};
+use crate::math::Real;
 use crossbeam::channel::Sender;
 
 bitflags::bitflags! {
     #[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
     /// Flags affecting the events generated for this collider.
     pub struct ActiveEvents: u32 {
-        /// If set, Rapier will call `EventHandler::handle_intersection_event` and
-        /// `EventHandler::handle_contact_event` whenever relevant for this collider.
+        /// If set, Rapier will call `EventHandler::handle_collision_event`
+        /// whenever relevant for this collider.
         const COLLISION_EVENTS = 0b0001;
+        /// If set, Rapier will call `EventHandler::handle_contact_force_event`
+        /// whenever relevant for this collider.
+        const CONTACT_FORCE_EVENTS = 0b0010;
     }
 }
 
@@ -25,6 +29,8 @@ pub trait EventHandler: Send + Sync {
     /// Handle a collision event.
     ///
     /// A collision event is emitted when the state of intersection between two colliders changes.
+    /// At least one of the involved colliders must have the `ActiveEvents::COLLISION_EVENTS` flag
+    /// set.
     ///
     /// # Parameters
     /// * `event` - The collision event.
@@ -40,6 +46,26 @@ pub trait EventHandler: Send + Sync {
         event: CollisionEvent,
         contact_pair: Option<&ContactPair>,
     );
+
+    /// Handle a force event.
+    ///
+    /// A force event is generated whenever the total force magnitude applied between two
+    /// colliders is `> Collider::contact_force_event_threshold` value of any of these
+    /// colliders with the `ActiveEvents::CONTACT_FORCE_EVENTS` flag set.
+    ///
+    /// The "total force magnitude" here means "the sum of the magnitudes of the forces applied at
+    /// all the contact points in a contact pair". Therefore, if the contact pair involves two
+    /// forces `{0.0, 1.0, 0.0}` and `{0.0, -1.0, 0.0}`, then the total force magnitude tested
+    /// against the `contact_force_event_threshold` is `2.0` even if the sum of these forces is actually the
+    /// zero vector.
+    fn handle_contact_force_event(
+        &self,
+        dt: Real,
+        bodies: &RigidBodySet,
+        colliders: &ColliderSet,
+        contact_pair: &ContactPair,
+        total_force_magnitude: Real,
+    );
 }
 
 impl EventHandler for () {
@@ -51,17 +77,34 @@ impl EventHandler for () {
         _contact_pair: Option<&ContactPair>,
     ) {
     }
+
+    fn handle_contact_force_event(
+        &self,
+        _dt: Real,
+        _bodies: &RigidBodySet,
+        _colliders: &ColliderSet,
+        _contact_pair: &ContactPair,
+        _total_force_magnitude: Real,
+    ) {
+    }
 }
 
 /// A collision event handler that collects events into a crossbeam channel.
 pub struct ChannelEventCollector {
-    event_sender: Sender<CollisionEvent>,
+    collision_event_sender: Sender<CollisionEvent>,
+    contact_force_event_sender: Sender<ContactForceEvent>,
 }
 
 impl ChannelEventCollector {
     /// Initialize a new collision event handler from crossbeam channel senders.
-    pub fn new(event_sender: Sender<CollisionEvent>) -> Self {
-        Self { event_sender }
+    pub fn new(
+        collision_event_sender: Sender<CollisionEvent>,
+        contact_force_event_sender: Sender<ContactForceEvent>,
+    ) -> Self {
+        Self {
+            collision_event_sender,
+            contact_force_event_sender,
+        }
     }
 }
 
@@ -73,6 +116,18 @@ impl EventHandler for ChannelEventCollector {
         event: CollisionEvent,
         _: Option<&ContactPair>,
     ) {
-        let _ = self.event_sender.send(event);
+        let _ = self.collision_event_sender.send(event);
+    }
+
+    fn handle_contact_force_event(
+        &self,
+        dt: Real,
+        _bodies: &RigidBodySet,
+        _colliders: &ColliderSet,
+        contact_pair: &ContactPair,
+        total_force_magnitude: Real,
+    ) {
+        let result = ContactForceEvent::from_contact_pair(dt, contact_pair, total_force_magnitude);
+        let _ = self.contact_force_event_sender.send(result);
     }
 }

@@ -33,8 +33,11 @@ mod fountain3;
 mod heightfield3;
 mod joints3;
 // mod joints3;
+mod character_controller3;
+mod debug_internal_edges3;
 mod keva3;
 mod locked_rotations3;
+mod newton_cradle3;
 mod one_way_platforms3;
 mod platform3;
 mod primitives3;
@@ -79,6 +82,7 @@ pub fn main() {
         .to_camel_case();
 
     let mut builders: Vec<(_, fn(&mut Testbed))> = vec![
+        ("Character controller", character_controller3::init_world),
         ("Fountain", fountain3::init_world),
         ("Primitives", primitives3::init_world),
         ("Multibody joints", joints3::init_world_with_articulations),
@@ -98,6 +102,7 @@ pub fn main() {
         ("Sensor", sensor3::init_world),
         ("TriMesh", trimesh3::init_world),
         ("Keva tower", keva3::init_world),
+        ("Newton cradle", newton_cradle3::init_world),
         ("(Debug) multibody_joints", debug_articulations3::init_world),
         (
             "(Debug) add/rm collider",
@@ -110,6 +115,7 @@ pub fn main() {
             debug_dynamic_collider_add3::init_world,
         ),
         ("(Debug) friction", debug_friction3::init_world),
+        ("(Debug) internal edges", debug_internal_edges3::init_world),
         ("(Debug) triangle", debug_triangle3::init_world),
         ("(Debug) trimesh", debug_trimesh3::init_world),
         ("(Debug) cylinder", debug_cylinder3::init_world),

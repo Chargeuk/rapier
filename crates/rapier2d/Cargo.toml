@@ -1,6 +1,6 @@
 [package]
 name    = "rapier2d"
-version = "0.13.0"
+version = "0.16.1"
 authors = [ "Sébastien Crozet <developer@crozet.re>" ]
 description = "2-dimensional physics engine in Rust."
 documentation = "http://docs.rs/rapier2d"
@@ -38,6 +38,9 @@ debug-disable-legitimate-fe-exceptions = [ ]
 # Do not enable this unless you are working on the engine internals.
 dev-remove-slow-accessors = []
 
+[package.metadata.docs.rs]
+features = ["parallel", "simd-stable", "serde-serialize", "debug-render"]
+
 [lib]
 name = "rapier2d"
 path = "../../src/lib.rs"
@@ -49,7 +52,7 @@ vec_map = { version = "0.8", optional = true }
 instant = { version = "0.1", features = [ "now" ], optional = true }
 num-traits = "0.2"
 nalgebra = "0.31"
-parry2d = "0.9"
+parry2d = "^0.11.1"
 simba = "0.7"
 approx = "0.5"
 rayon = { version = "1", optional = true }
@@ -66,3 +69,9 @@ bitflags = "1"
 [dev-dependencies]
 bincode = "1"
 serde = { version = "1", features = [ "derive" ] }
+
+[profile.release]
+debug = false
+codegen-units = 1
+lto = true
+opt-level = 3

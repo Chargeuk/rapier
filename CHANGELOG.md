@@ -1,3 +1,93 @@
+## v0.16.1 (10 Nov. 2022)
+### Fix
+- Fixed docs build on `docs.rs`.
+
+
+## v0.16.0 (30 Oct. 2022)
+### Added
+- Implement `Copy` for `CharacterCollision`.
+- Implement conversion (`From` trait) between `Group` and `u32`.
+- Add `ColliderBuilder::trimesh_with_flags` to build a triangle mesh with specific flags controlling
+  its initialization.
+
+### Modified
+- Rename `AABB` to `Aabb` to comply with Rust’s style guide.
+- Switch to `parry 0.11`.
+
+### Fix
+- Fix internal edges of 3D triangle meshes or 3D heightfields generating invalid contacts preventing
+  balls from moving straight.
+
+## v0.15.0 (02 Oct. 2022)
+### Added
+- Add a **kinematic character** controller implementation. See the `control` module. The character controller currently
+  supports the following features:
+    - Slide on uneven terrains
+    - Interaction with dynamic bodies.
+    - Climb stairs automatically.
+    - Automatically snap the body to the floor when going downstairs.
+    - Prevent sliding up slopes that are too steep
+    - Prevent sliding down slopes that are not steep enough
+    - Interactions with moving platforms.
+    - Report information on the obstacles it hit on its path.
+- Implement `serde` serialization/deserialization for `CollisionEvents` when the `serde-serialize` feature is enabled
+
+
+### Modified
+- The methods `Collider::set_rotation`, `RigidBody::set_rotation`, and `RigidBody::set_next_kinematic_rotation` now
+  take a rotation (`UnitQuaternion` or `UnitComplex`) instead of a vector/angle.
+- The method `QueryFilter::exclude_dynamic` is now a static method (the `self` argument was removed).
+- The `QueryPipeline::cast_shape` method has a new argument `stop_at_penertation`. If set to `false`, the linear
+  shape-cast won’t immediately stop if the shape is penetrating another shape at its starting point **and** its
+  trajectory is such that it’s on a path to exist that penetration state.
+- The `InteractionGroups` is now a set of explicit bit flags instead of a raw `u32`.
+- The world-space mass properties of rigid-bodies are now updated automatically whenever the user changes their
+  position.
+
+## v0.14.0 (09 July 2022)
+### Fixed
+- Fix unpredictable broad-phase panic when using small colliders in the simulation.
+- Fix collision events being incorrectly generated for any shape that produces multiple
+  contact manifolds (like triangle meshes).
+- Fix panic in the `CollisionPipeline` if a collider is both added and removed before a call
+  to `CollisionPipeline::step`.
+
+### Modified
+- The `RigidBodyBuilder::additional_mass` method will now result in the additional angular inertia
+  being automatically computed based on the shapes of the colliders attached to the rigid-body.
+- Remove the deprecated methods `RigidBodyBuilder::mass`, `::principal_angular_inertia`, `::principal_inertia`.
+- Remove the methods `RigidBodyBuilder::additional_principal_angular_inertia`. Use
+  `RigidBodyBuilder::additional_mass_properties` instead.
+- The `Collider::density` method now always returns a `Real` (instead of an `Option<Real>`).
+- Rename `RigidBody::restrict_rotations` and `RigidBody::restrict_translations` to
+  `RigidBody::set_enabled_rotations` and `RigidBody::set_enabled_translations`.
+- Rename `RigidBodyBuilder::restrict_rotations` and `RigidBodyBuilder::restrict_translations` to
+  `RigidBodyBuilder::enabled_rotations` and `RigidBodyBuilder::enabled_translations`.
+
+### Added
+- Add `RigidBody::recompute_mass_properties_from_colliders` to force the immediate computation
+  of a rigid-body’s mass properties (instead of waiting for them to be recomputed during the next
+  timestep). This is useful to be able to read immediately the result of a change of a rigid-body
+  additional mass-properties or a change of one of its collider’s mass-properties.
+- Add `RigidBody::set_additional_mass` to set the additional mass for the collider. The additional
+  angular inertia is automatically computed based on the attached colliders shapes.
+- Add `Collider::set_density`, `::set_mass`, `set_mass_properties`, to alter a collider’s mass
+  properties. Note that `::set_mass` will result in the collider’s angular inertia being automatically
+  computed based on this mass and on its shape.
+- Add `ColliderBuilder::mass` to set the mass of the collider instead of its density. Its angular
+  inertia tensor will be automatically computed based on this mass and its shape.
+- Add `Collider::mass` and `Collider::volume` to retrieve the mass or volume of a collider.
+- Add the `QueryFilter` that is now used by all the scene queries instead of the `CollisionGroups` and `Fn(ColliderHandle) -> bool`
+  closure. This `QueryFilter` provides easy access to most common filtering strategies (e.g. dynamic bodies only,
+  excluding one particular collider, etc.) for scene queries.
+- Add force reporting based on contact force events. The `EventHandler` trait has been modified to include
+  the method `EventHandler::handle_contact_force_event`. Contact force events are generated whenever the sum of the
+  magnitudes of all the forces between two colliders is greater than any of their
+  `Collider::contact_force_event_threshold` values (only the colliders wit the  `ActiveEvents::CONTACT_FORCE_EVENT` flag
+  set are taken into account for this threshold).
+- Add the `ContactForceEvent` struct that is generated by the `ChannelEventCollector` to report
+  contact force events.
+
 ## v0.13.0 (31 May 2022)
 ### Fixed
 - Fix incorrect sensor events being generated after collider removal.
@@ -18,7 +108,7 @@
   by default.
 
 ### Added
-- Debug-renderer: add rendering of contacts, solver contacts, and collider AABBs
+- Debug-renderer: add rendering of contacts, solver contacts, and collider Aabbs
 - Add `MultibodyJointSet::attached_joints` to return all the multibody joints attached to a given rigid-body.
 
 ## v0.12.0 (30 Apr. 2022)

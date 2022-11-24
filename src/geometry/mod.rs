@@ -8,13 +8,15 @@ pub use self::contact_pair::{
 pub use self::interaction_graph::{
     ColliderGraphIndex, InteractionGraph, RigidBodyGraphIndex, TemporaryInteractionIndex,
 };
-pub use self::interaction_groups::InteractionGroups;
+pub use self::interaction_groups::{Group, InteractionGroups};
 pub use self::narrow_phase::NarrowPhase;
 
 pub use self::collider::{Collider, ColliderBuilder};
 pub use self::collider_set::ColliderSet;
 
 pub use parry::query::TrackedContact;
+
+use crate::math::{Real, Vector};
 
 /// A contact between two colliders.
 pub type Contact = parry::query::TrackedContact<ContactData>;
@@ -39,7 +41,7 @@ pub type Cylinder = parry::shape::Cylinder;
 #[cfg(feature = "dim3")]
 pub type Cone = parry::shape::Cone;
 /// An axis-aligned bounding box.
-pub type AABB = parry::bounding_volume::AABB;
+pub type Aabb = parry::bounding_volume::Aabb;
 /// A ray that can be cast against colliders.
 pub type Ray = parry::query::Ray;
 /// The intersection between a ray and a  collider.
@@ -63,6 +65,7 @@ bitflags::bitflags! {
     }
 }
 
+#[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
 #[derive(Copy, Clone, Hash, Debug)]
 /// Events occurring when two colliders start or stop colliding
 pub enum CollisionEvent {
@@ -116,9 +119,66 @@ impl CollisionEvent {
     }
 }
 
+#[derive(Copy, Clone, PartialEq, Debug, Default)]
+/// Event occurring when the sum of the magnitudes of the contact forces
+/// between two colliders exceed a threshold.
+pub struct ContactForceEvent {
+    /// The first collider involved in the contact.
+    pub collider1: ColliderHandle,
+    /// The second collider involved in the contact.
+    pub collider2: ColliderHandle,
+    /// The sum of all the forces between the two colliders.
+    pub total_force: Vector<Real>,
+    /// The sum of the magnitudes of each force between the two colliders.
+    ///
+    /// Note that this is **not** the same as the magnitude of `self.total_force`.
+    /// Here we are summing the magnitude of all the forces, instead of taking
+    /// the magnitude of their sum.
+    pub total_force_magnitude: Real,
+    /// The world-space (unit) direction of the force with strongest magnitude.
+    pub max_force_direction: Vector<Real>,
+    /// The magnitude of the largest force at a contact point of this contact pair.
+    pub max_force_magnitude: Real,
+}
+
+impl ContactForceEvent {
+    /// Init a contact force event from a contact pair.
+    pub fn from_contact_pair(dt: Real, pair: &ContactPair, total_force_magnitude: Real) -> Self {
+        let mut result = ContactForceEvent {
+            collider1: pair.collider1,
+            collider2: pair.collider2,
+            total_force_magnitude,
+            ..ContactForceEvent::default()
+        };
+
+        for m in &pair.manifolds {
+            let mut total_manifold_impulse = 0.0;
+            for pt in m.contacts() {
+                total_manifold_impulse += pt.data.impulse;
+
+                if pt.data.impulse > result.max_force_magnitude {
+                    result.max_force_magnitude = pt.data.impulse;
+                    result.max_force_direction = m.data.normal;
+                }
+            }
+
+            result.total_force += m.data.normal * total_manifold_impulse;
+        }
+
+        let inv_dt = crate::utils::inv(dt);
+        // NOTE: convert impulses to forces. Note that we
+        //       don’t need to convert the `total_force_magnitude`
+        //       because it’s an input of this function already
+        //       assumed to be a force instead of an impulse.
+        result.total_force *= inv_dt;
+        result.max_force_magnitude *= inv_dt;
+        result
+    }
+}
+
 pub(crate) use self::broad_phase_multi_sap::SAPProxyIndex;
 pub(crate) use self::narrow_phase::ContactManifoldIndex;
-pub(crate) use parry::partitioning::QBVH;
+pub(crate) use parry::partitioning::Qbvh;
 pub use parry::shape::*;
 
 #[cfg(feature = "serde-serialize")]
