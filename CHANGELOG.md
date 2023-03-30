@@ -1,7 +1,54 @@
+## Unlereased
+### Added
+- Add `SphericalJoint::local_frame1/2`, `::set_local_frame1/2`, and `SphericalJointBuilder::local_frame1/2` to set both
+  the joint’s anchor and reference orientation.
+- Add `EffectiveCharacterMovement::is_sliding_down_slope` to indicate if the character controlled by the kinematic
+  character controller is sliding on a slope that is too steep.
+- Add `Wheel::side_friction_stiffness` to customize the side friction applied to the vehicle controller’s wheel.
+
+### Modified
+- Make `Wheel::friction_slip` public to customize the front friction applied to the vehicle controller’s wheels.
+
+## v0.17.2 (26 Feb. 2023)
+### Fix
+- Fix issue with convex polyhedron jitter due to missing contacts.
+- Fix character controller getting stuck against vertical walls.
+- Fix character controller’s snapping to ground not triggering sometimes.
+- Fix character controller’s horizontal offset being mostly ignored and some instances of vertical offset being ignored.
+
+## v0.17.1 (22 Jan. 2023)
+### Fix
+- Fix bug resulting in dynamic rigid-bodies acting as kinematic bodies after being disabled and then re-enabled.
+
+
+## v0.17.0 (15 Jan. 2023)
+### Added
+- Add `RigidBody::set_enabled`, `RigidBody::is_enabled`, `RigidBodyBuilder::enabled` to enable/disable a rigid-body
+  without having to delete it. Disabling a rigid-body attached to a multibody joint isn’t supported yet.
+- Add `Collider::set_enabled`, `Collider::is_enabled`, `ColliderBuilder::enabled` to enable/disable a collider
+  without having to delete it.
+- Add `GenericJoint::set_enabled`, `GenericJoint::is_enabled` to enable/disable a joint without having to delete it.
+  Disabling a multibody joint isn’t supported yet.
+- Add `DynamicRayCastVehicleController`, a vehicle controller based on ray-casting and dynamic rigid-bodies (mostly
+  a port of the vehicle controller from Bullet physics).
+- Add `RigidBody::user_force` and `RigidBody::user_torque` to read the forces or torques added by the user to a
+  dynamic rigid-body.
+- Add `RigidBody::locked_axes` to get the rigid-body axes that were locked by the user.
+
+### Modified
+- Add the `QueryPipeline` as an optional argument to `PhysicsPipeline::step` and `CollisionPipeline::step`. If this
+  argument is specified, then the query pipeline will be incrementally (i.e. more efficiently) update at the same time as
+  these other pipelines. In that case, calling `QueryPipeline::update` a `PhysicsPipeline::step` isn’t needed.
+- `RigidBody::set_body_type` now takes an extra boolean argument indicating if the rigid-body should be woken-up
+  (if it becomes dynamic).
+- `RigidBody::mass_properties` now also returns the world-space mass-properties of the rigid-body.
+
+### Fix
+- Fix bug resulting in rigid-bodies being awakened after they are created, even if they are created sleeping.
+
 ## v0.16.1 (10 Nov. 2022)
 ### Fix
 - Fixed docs build on `docs.rs`.
-
 
 ## v0.16.0 (30 Oct. 2022)
 ### Added
