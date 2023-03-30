@@ -112,6 +112,8 @@ bitflags::bitflags! {
         const DOMINANCE   = 1 << 5;
         /// Flag indicating that the local mass-properties of this rigid-body must be recomputed.
         const LOCAL_MASS_PROPERTIES = 1 << 6;
+        /// Flag indicating that the rigid-body was enabled or disabled.
+        const ENABLED_OR_DISABLED = 1 << 7;
     }
 }
 
@@ -243,7 +245,7 @@ impl Default for RigidBodyAdditionalMassProps {
 
 #[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
 #[derive(Clone, Debug, PartialEq)]
-/// The mass properties of this rigid-bodies.
+/// The mass properties of a rigid-body.
 pub struct RigidBodyMassProps {
     /// Flags for locking rotation and translation.
     pub flags: LockedAxes,
@@ -329,12 +331,14 @@ impl RigidBodyMassProps {
 
         for handle in &attached_colliders.0 {
             if let Some(co) = colliders.get(*handle) {
-                if let Some(co_parent) = co.parent {
-                    let to_add = co
-                        .mprops
-                        .mass_properties(&*co.shape)
-                        .transform_by(&co_parent.pos_wrt_parent);
-                    self.local_mprops += to_add;
+                if co.is_enabled() {
+                    if let Some(co_parent) = co.parent {
+                        let to_add = co
+                            .mprops
+                            .mass_properties(&*co.shape)
+                            .transform_by(&co_parent.pos_wrt_parent);
+                        self.local_mprops += to_add;
+                    }
                 }
             }
         }
@@ -974,6 +978,8 @@ pub struct RigidBodyActivation {
     pub linear_threshold: Real,
     /// The angular linear velocity bellow which the body can fall asleep.
     pub angular_threshold: Real,
+    /// The amount of time the rigid-body must remain below the thresholds to be put to sleep.
+    pub time_until_sleep: Real,
     /// Since how much time can this body sleep?
     pub time_since_can_sleep: Real,
     /// Is this body sleeping?
@@ -1008,6 +1014,7 @@ impl RigidBodyActivation {
         RigidBodyActivation {
             linear_threshold: Self::default_linear_threshold(),
             angular_threshold: Self::default_angular_threshold(),
+            time_until_sleep: Self::default_time_until_sleep(),
             time_since_can_sleep: 0.0,
             sleeping: false,
         }
@@ -1018,8 +1025,9 @@ impl RigidBodyActivation {
         RigidBodyActivation {
             linear_threshold: Self::default_linear_threshold(),
             angular_threshold: Self::default_angular_threshold(),
-            sleeping: true,
+            time_until_sleep: Self::default_time_until_sleep(),
             time_since_can_sleep: Self::default_time_until_sleep(),
+            sleeping: true,
         }
     }
 
@@ -1051,6 +1059,6 @@ impl RigidBodyActivation {
     #[inline]
     pub fn sleep(&mut self) {
         self.sleeping = true;
-        self.time_since_can_sleep = Self::default_time_until_sleep();
+        self.time_since_can_sleep = self.time_until_sleep;
     }
 }
