@@ -33,6 +33,18 @@
 
 ---
 
+{% if js_package_name == "rapier3d" %}
+## Chargeuk compatibility package
+
+The combined [Chargeuk fork](https://github.com/Chargeuk/rapier) produces
+`@chargeuk/rapier3d-compat@0.21.0-chargeuk.1`, based on engine 0.36.0 and
+bindings 0.21.0. It preserves detailed collision grouping and creation-time
+revolute limits for KaDshow. The compatibility build embeds non-SIMD WASM and
+exports CJS, ESM and TypeScript declarations. Upstream authorship and the
+Apache-2.0 license are preserved; the packages listed below describe upstream
+variants rather than this fork's publication identity.
+
+{% endif %}
 ## Feature selection
 
 Multiple NPM packages exist for Rapier, depending on your needs:

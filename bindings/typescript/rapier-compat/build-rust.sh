@@ -1,5 +1,6 @@
 #!/bin/sh
 
+set -e
 
 help()
 {
@@ -54,6 +55,7 @@ cargo clean --manifest-path ../Cargo.toml
 RUSTFLAGS="${additional_rustflags}" wasm-pack \
     --verbose \
     build \
+    --mode "${WASM_PACK_MODE:-normal}" \
     --target web \
     --out-dir "../../rapier-compat/builds/${dimension}d${feature_postfix}/wasm-build" \
     "$rust_source_directory"

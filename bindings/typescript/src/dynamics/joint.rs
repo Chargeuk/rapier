@@ -283,13 +283,20 @@ impl RawGenericJoint {
     /// A revolute joint removes all degrees of freedom between the affected
     /// bodies except for the rotation.
     #[cfg(feature = "dim2")]
-    pub fn revolute(anchor1: &RawVector, anchor2: &RawVector) -> Option<RawGenericJoint> {
-        Some(Self(
-            RevoluteJointBuilder::new()
-                .local_anchor1(anchor1.0.into())
-                .local_anchor2(anchor2.0.into())
-                .into(),
-        ))
+    pub fn revolute(
+        anchor1: &RawVector,
+        anchor2: &RawVector,
+        limitsEnabled: bool,
+        limitsMin: f32,
+        limitsMax: f32,
+    ) -> Option<RawGenericJoint> {
+        let mut joint = RevoluteJointBuilder::new()
+            .local_anchor1(anchor1.0.into())
+            .local_anchor2(anchor2.0.into());
+        if limitsEnabled {
+            joint = joint.limits([limitsMin, limitsMax]);
+        }
+        Some(Self(joint.into()))
     }
 
     /// Create a new joint descriptor that builds Revolute joints.
@@ -301,14 +308,18 @@ impl RawGenericJoint {
         anchor1: &RawVector,
         anchor2: &RawVector,
         axis: &RawVector,
+        limitsEnabled: bool,
+        limitsMin: f32,
+        limitsMax: f32,
     ) -> Option<RawGenericJoint> {
         let axis = axis.0.try_normalize()?;
-        Some(Self(
-            RevoluteJointBuilder::new(axis)
-                .local_anchor1(anchor1.0.into())
-                .local_anchor2(anchor2.0.into())
-                .into(),
-        ))
+        let mut joint = RevoluteJointBuilder::new(axis)
+            .local_anchor1(anchor1.0.into())
+            .local_anchor2(anchor2.0.into());
+        if limitsEnabled {
+            joint = joint.limits([limitsMin, limitsMax]);
+        }
+        Some(Self(joint.into()))
     }
 
     /// Create a new joint descriptor that builds Revolute joints with
@@ -323,15 +334,79 @@ impl RawGenericJoint {
         anchor2: &RawVector,
         axis1: &RawVector,
         axis2: &RawVector,
+        limitsEnabled: bool,
+        limitsMin: f32,
+        limitsMax: f32,
     ) -> Option<RawGenericJoint> {
         let axis1 = axis1.0.try_normalize()?;
         let axis2 = axis2.0.try_normalize()?;
-        let joint: GenericJoint = GenericJointBuilder::new(JointAxesMask::LOCKED_REVOLUTE_AXES)
+        let mut joint: GenericJoint = GenericJointBuilder::new(JointAxesMask::LOCKED_REVOLUTE_AXES)
             .local_anchor1(anchor1.0.into())
             .local_anchor2(anchor2.0.into())
             .local_axis1(axis1)
             .local_axis2(axis2)
             .into();
+        if limitsEnabled {
+            joint.set_limits(JointAxis::AngX, [limitsMin, limitsMax]);
+        }
         Some(Self(joint))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rapier::math::Vector;
+
+    #[test]
+    fn revolute_creation_respects_enabled_and_disabled_limits() {
+        let anchor = RawVector(Vector::ZERO);
+        for enabled in [false, true] {
+            #[cfg(feature = "dim2")]
+            let joint = RawGenericJoint::revolute(&anchor, &anchor, enabled, -0.4, 0.7).unwrap();
+            #[cfg(feature = "dim3")]
+            let joint = RawGenericJoint::revolute(
+                &anchor,
+                &anchor,
+                &RawVector(Vector::X),
+                enabled,
+                -0.4,
+                0.7,
+            )
+            .unwrap();
+            let limits = joint.0.limits(JointAxis::AngX);
+            assert_eq!(limits.is_some(), enabled);
+            if let Some(limits) = limits {
+                assert_eq!([limits.min, limits.max], [-0.4, 0.7]);
+            }
+        }
+    }
+
+    #[cfg(feature = "dim3")]
+    #[test]
+    fn independent_revolute_axes_survive_creation_with_limits() {
+        let anchor1 = RawVector(Vector::new(1.0, 2.0, 3.0));
+        let anchor2 = RawVector(Vector::new(3.0, 2.0, 1.0));
+        for enabled in [false, true] {
+            let joint = RawGenericJoint::revoluteWithAxes(
+                &anchor1,
+                &anchor2,
+                &RawVector(Vector::X * 2.0),
+                &RawVector(Vector::Y * 3.0),
+                enabled,
+                -0.4,
+                0.7,
+            )
+            .unwrap();
+            // Use rotation for a direction: upstream local_axis getters also translate by the anchor.
+            assert!((joint.0.local_frame1.rotation * Vector::X - Vector::X).length() < 1.0e-5);
+            assert!((joint.0.local_frame2.rotation * Vector::X - Vector::Y).length() < 1.0e-5);
+            assert_eq!(joint.0.limits(JointAxis::AngX).is_some(), enabled);
+            assert_eq!(joint.0.local_anchor1(), anchor1.0);
+            assert_eq!(joint.0.local_anchor2(), anchor2.0);
+            if let Some(limits) = joint.0.limits(JointAxis::AngX) {
+                assert_eq!([limits.min, limits.max], [-0.4, 0.7]);
+            }
+        }
     }
 }

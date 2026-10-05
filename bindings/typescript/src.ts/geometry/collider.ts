@@ -415,6 +415,27 @@ export class Collider {
     }
 
     /**
+     * Sets standard collision groups and the additional same-group masks.
+     * Within a matching grouping ID, both membership/collision masks must match.
+     * Different grouping IDs use only the standard collision groups.
+     * Calling `setCollisionGroups` restores neutral additional masks and ID.
+     */
+    public setDetailedCollisionGroups(
+        groups: InteractionGroups,
+        belongs_to_with_grouping: number,
+        collides_with_with_grouping: number,
+        belongs_to_grouping: number,
+    ) {
+        this.colliderSet.raw.coSetDetailedCollisionGroups(
+            this.handle,
+            groups,
+            belongs_to_with_grouping,
+            collides_with_with_grouping,
+            belongs_to_grouping,
+        );
+    }
+
+    /**
      * Sets the solver groups used by this collider.
      *
      * Forces between two colliders in contact will be computed iff their solver
@@ -1420,6 +1441,12 @@ export class ColliderDesc {
     translation: Vector;
     isSensor: boolean;
     collisionGroups: InteractionGroups;
+    /** Additional membership mask within the same grouping. */
+    belongsToWithGrouping: number;
+    /** Additional collision mask within the same grouping. */
+    collidesWithWithGrouping: number;
+    /** Grouping ID; differing IDs bypass the additional masks. */
+    belongsToGrouping: number;
     solverGroups: InteractionGroups;
     frictionCombineRule: CoefficientCombineRule;
     restitutionCombineRule: CoefficientCombineRule;
@@ -1445,6 +1472,9 @@ export class ColliderDesc {
         this.translation = VectorOps.zeros();
         this.isSensor = false;
         this.collisionGroups = 0xffff_ffff;
+        this.belongsToWithGrouping = 0xffff_ffff;
+        this.collidesWithWithGrouping = 0xffff_ffff;
+        this.belongsToGrouping = 0xffff_ffff;
         this.solverGroups = 0xffff_ffff;
         this.frictionCombineRule = CoefficientCombineRule.Average;
         this.restitutionCombineRule = CoefficientCombineRule.Average;
@@ -2166,6 +2196,24 @@ export class ColliderDesc {
      */
     public setCollisionGroups(groups: InteractionGroups): ColliderDesc {
         this.collisionGroups = groups;
+        return this;
+    }
+
+    /** Sets the additional membership mask within the same grouping. */
+    public setBelongsToWithGrouping(mask: number): ColliderDesc {
+        this.belongsToWithGrouping = mask;
+        return this;
+    }
+
+    /** Sets the additional collision mask within the same grouping. */
+    public setCollidesWithWithGrouping(mask: number): ColliderDesc {
+        this.collidesWithWithGrouping = mask;
+        return this;
+    }
+
+    /** Sets the grouping ID used by the additional collision masks. */
+    public setBelongsToGrouping(grouping: number): ColliderDesc {
+        this.belongsToGrouping = grouping;
         return this;
     }
 

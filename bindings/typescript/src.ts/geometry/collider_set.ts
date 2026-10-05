@@ -145,6 +145,14 @@ export class ColliderSet {
 
         let parent = hasParent ? bodies.get(parentHandle) : null;
         let collider = new Collider(this, handle, parent, desc.shape);
+        // Apply detailed groups before exposing the collider or stepping the world.
+        // Keep the upstream raw creation signature and its neutral defaults intact.
+        collider.setDetailedCollisionGroups(
+            desc.collisionGroups,
+            desc.belongsToWithGrouping,
+            desc.collidesWithWithGrouping,
+            desc.belongsToGrouping,
+        );
         this.map.set(handle, collider);
         return collider;
     }
@@ -238,6 +246,12 @@ export class ColliderSet {
 
         let parent = bodies.get(parentHandle);
         let collider = new Collider(this, handle, parent, desc.shape);
+        collider.setDetailedCollisionGroups(
+            desc.collisionGroups,
+            desc.belongsToWithGrouping,
+            desc.collidesWithWithGrouping,
+            desc.belongsToGrouping,
+        );
         this.map.set(handle, collider);
         return collider;
     }

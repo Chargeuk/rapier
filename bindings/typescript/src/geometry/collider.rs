@@ -1191,6 +1191,23 @@ impl RawColliderSet {
         self.map_mut(handle, |co| co.set_solver_groups(groups))
     }
 
+    pub fn coSetDetailedCollisionGroups(
+        &mut self,
+        handle: FlatHandle,
+        groups: u32,
+        belongs_to_with_grouping: u32,
+        collides_with_with_grouping: u32,
+        belongs_to_grouping: u32,
+    ) {
+        let groups = super::unpack_detailed_interaction_groups(
+            groups,
+            belongs_to_with_grouping,
+            collides_with_with_grouping,
+            belongs_to_grouping,
+        );
+        self.map_mut(handle, |co| co.set_collision_groups(groups))
+    }
+
     pub fn coSetActiveHooks(&mut self, handle: FlatHandle, hooks: u32) {
         let hooks = ActiveHooks::from_bits(hooks).unwrap_or(ActiveHooks::empty());
         self.map_mut(handle, |co| co.set_active_hooks(hooks));

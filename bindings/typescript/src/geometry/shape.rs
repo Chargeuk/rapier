@@ -1114,7 +1114,7 @@ mod tests {
         // A single zero-area triangle can’t produce any convex part.
         let vertices = vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 2.0, 0.0, 0.0];
         let indices = vec![0, 1, 2];
-        assert!(RawShape::convexDecomposition(vertices, indices).is_none());
+        assert!(RawShape::convexDecomposition(vertices, indices, 0).is_none());
     }
 
     #[test]

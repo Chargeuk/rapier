@@ -786,9 +786,12 @@ export class JointData {
         let rawA2 = VectorOps.intoRaw(this.anchor2);
         let rawAx;
         let result;
-        let limitsEnabled = false;
-        let limitsMin = 0.0;
-        let limitsMax = 0.0;
+        let limitsEnabled =
+            (this.jointType === JointType.Prismatic ||
+                this.jointType === JointType.Revolute) &&
+            !!this.limitsEnabled;
+        let limitsMin = limitsEnabled ? this.limits[0] : 0.0;
+        let limitsMax = limitsEnabled ? this.limits[1] : 0.0;
 
         switch (this.jointType) {
             case JointType.Fixed:
@@ -812,12 +815,6 @@ export class JointData {
                 break;
             case JointType.Prismatic:
                 rawAx = VectorOps.intoRaw(this.axis);
-
-                if (!!this.limitsEnabled) {
-                    limitsEnabled = true;
-                    limitsMin = this.limits[0];
-                    limitsMax = this.limits[1];
-                }
 
                 // #if DIM2
                 result = RawGenericJoint.prismatic(
@@ -845,7 +842,13 @@ export class JointData {
                 break;
             // #if DIM2
             case JointType.Revolute:
-                result = RawGenericJoint.revolute(rawA1, rawA2);
+                result = RawGenericJoint.revolute(
+                    rawA1,
+                    rawA2,
+                    limitsEnabled,
+                    limitsMin,
+                    limitsMax,
+                );
                 break;
             // #endif
             // #if DIM3
@@ -873,12 +876,22 @@ export class JointData {
                         rawA2,
                         rawAx1,
                         rawAx2,
+                        limitsEnabled,
+                        limitsMin,
+                        limitsMax,
                     );
                     rawAx1.free();
                     rawAx2.free();
                 } else {
                     rawAx = VectorOps.intoRaw(this.axis);
-                    result = RawGenericJoint.revolute(rawA1, rawA2, rawAx);
+                    result = RawGenericJoint.revolute(
+                        rawA1,
+                        rawA2,
+                        rawAx,
+                        limitsEnabled,
+                        limitsMin,
+                        limitsMax,
+                    );
                     rawAx.free();
                 }
                 break;

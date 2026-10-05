@@ -1,6 +1,13 @@
 # Copy source and remove #if sections - similar to script in ../rapierXd
 set -e
 
+# Leave the upstream six-variant build unchanged unless a scoped build is requested.
+case "${RAPIER_COMPAT_VARIANT:-all}" in
+  all) dimensions="2d 3d"; variants="2d 2d-deterministic 2d-simd 3d 3d-deterministic 3d-simd" ;;
+  3d) dimensions="3d"; variants="3d" ;;
+  *) echo "Unsupported RAPIER_COMPAT_VARIANT: $RAPIER_COMPAT_VARIANT" >&2; exit 1 ;;
+esac
+
 gen_js() {
   DIM=$1
   GENOUT="./gen${DIM}"
@@ -16,29 +23,21 @@ gen_js() {
   cp -r ./src${DIM}/* $GENOUT
 }
 
-gen_js "2d"
-gen_js "3d"
-
-# See https://serverfault.com/a/137848
-find gen2d/ -type f -print0 | LC_ALL=C xargs -0 sed -i.bak '\:#if DIM3:,\:#endif:d'
-find gen3d/ -type f -print0 | LC_ALL=C xargs -0 sed -i.bak '\:#if DIM2:,\:#endif:d'
-
-# Clean up backup files.
-find gen2d/ -type f -name '*.bak' | xargs rm
-find gen3d/ -type f -name '*.bak' | xargs rm
-
-for features_set in \
-"2" "2 deterministic" "2 simd" \
-"3" "3 deterministic" "3 simd"
-do
-
-  set -- $features_set # Convert the "tuple" into the param args $1 $2...
-  dimension=$1
-  if [ -z "$2" ]; then
-    feature="${1}d";
+for dim in $dimensions; do
+  gen_js "$dim"
+  if [ "$dim" = "2d" ]; then
+    excluded="DIM3"
   else
-    feature="${1}d-${2}";
+    excluded="DIM2"
   fi
+  # See https://serverfault.com/a/137848
+  find "gen${dim}/" -type f -print0 | LC_ALL=C xargs -0 sed -i.bak "\\:#if ${excluded}:,\\:#endif:d"
+  find "gen${dim}/" -type f -name '*.bak' -delete
+done
+
+for feature in $variants; do
+  dim="${feature%%-*}"
+  dimension="${dim%d}"
 
   pkg_dir="./builds/${feature}/pkg"
   dist_dir="${pkg_dir}/dist"

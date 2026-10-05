@@ -35,6 +35,17 @@ const config = (dim, features_postfix) => {
                         transform(content) {
                             let config = JSON.parse(content.toString());
                             config.name = `@dimforge/rapier${features_postfix}-compat`;
+                            if (features_postfix === "3d") {
+                                config.name = "@chargeuk/rapier3d-compat";
+                                config.version = "0.21.0-chargeuk.1";
+                                config.repository = {
+                                    type: "git",
+                                    url: "git+https://github.com/Chargeuk/rapier.git",
+                                };
+                                config.description += " Chargeuk KaDshow fork.";
+                                config.publishConfig = {access: "public"};
+                                delete config.private;
+                            }
                             config.description +=
                                 " Compatibility package with inlined webassembly as base64.";
                             config.types = "dist/rapier.d.ts";
@@ -83,11 +94,18 @@ const config = (dim, features_postfix) => {
     };
 };
 
-export default [
-    config("2d", "2d"),
-    config("2d", "2d-deterministic"),
-    config("2d", "2d-simd"),
-    config("3d", "3d"),
-    config("3d", "3d-deterministic"),
-    config("3d", "3d-simd"),
-];
+const variant = process.env.RAPIER_COMPAT_VARIANT;
+if (variant && variant !== "3d" && variant !== "all") {
+    throw new Error(`Unsupported RAPIER_COMPAT_VARIANT: ${variant}`);
+}
+
+export default variant === "3d"
+    ? [config("3d", "3d")]
+    : [
+          config("2d", "2d"),
+          config("2d", "2d-deterministic"),
+          config("2d", "2d-simd"),
+          config("3d", "3d"),
+          config("3d", "3d-deterministic"),
+          config("3d", "3d-simd"),
+      ];
