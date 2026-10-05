@@ -1,14 +1,9 @@
+//! Headless benchmark: builds a capsule stack and steps it without any window
+//! or testbed, printing the number of steps executed.
 use rapier3d::prelude::*;
-use rapier_testbed3d::harness::Harness;
 
-pub fn init_world(harness: &mut Harness) {
-    /*
-     * World
-     */
-    let mut bodies = RigidBodySet::new();
-    let mut colliders = ColliderSet::new();
-    let impulse_joints = ImpulseJointSet::new();
-    let multibody_joints = MultibodyJointSet::new();
+fn build_world() -> PhysicsWorld {
+    let mut world = PhysicsWorld::new();
 
     /*
      * Ground
@@ -16,10 +11,9 @@ pub fn init_world(harness: &mut Harness) {
     let ground_size = 200.1;
     let ground_height = 0.1;
 
-    let rigid_body = RigidBodyBuilder::fixed().translation(vector![0.0, -ground_height, 0.0]);
-    let handle = bodies.insert(rigid_body);
+    let rigid_body = RigidBodyBuilder::fixed().translation(Vector::new(0.0, -ground_height, 0.0));
     let collider = ColliderBuilder::cuboid(ground_size, ground_height, ground_size);
-    colliders.insert_with_parent(collider, handle, &mut bodies);
+    let (_handle, _) = world.insert(rigid_body, collider);
 
     /*
      * Create the cubes
@@ -43,26 +37,23 @@ pub fn init_world(harness: &mut Harness) {
                 let z = k as f32 * shift - centerz + offset;
 
                 // Build the rigid body.
-                let rigid_body = RigidBodyBuilder::dynamic().translation(vector![x, y, z]);
-                let handle = bodies.insert(rigid_body);
+                let rigid_body = RigidBodyBuilder::dynamic().translation(Vector::new(x, y, z));
                 let collider = ColliderBuilder::capsule_y(rad, rad);
-                colliders.insert_with_parent(collider, handle, &mut bodies);
+                let (_handle, _) = world.insert(rigid_body, collider);
             }
         }
 
         offset -= 0.05 * rad * (num as f32 - 1.0);
     }
 
-    /*
-     * Set up the harness.
-     */
-    harness.set_world(bodies, colliders, impulse_joints, multibody_joints);
+    world
 }
 
 fn main() {
-    let harness = &mut Harness::new_empty();
-    init_world(harness);
-    harness.set_max_steps(10000);
-    harness.run();
-    println!("{}", harness.state.timestep_id);
+    let mut world = build_world();
+    let num_steps = 10000;
+    for _ in 0..num_steps {
+        world.step();
+    }
+    println!("{num_steps}");
 }

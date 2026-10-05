@@ -1,10 +1,11 @@
+use super::DebugColor;
 use crate::dynamics::{
     ImpulseJoint, ImpulseJointHandle, Multibody, MultibodyLink, RigidBody, RigidBodyHandle,
+    SoftBody, SoftBodyHandle,
 };
-use crate::geometry::Collider;
-use crate::math::{Isometry, Point, Real, Vector};
+use crate::geometry::{Aabb, Collider, ContactPair};
+use crate::math::{Pose, Vector};
 use crate::prelude::{ColliderHandle, MultibodyJointHandle};
-use na::Scale;
 
 /// The object currently being rendered by the debug-renderer.
 #[derive(Copy, Clone)]
@@ -13,12 +14,16 @@ pub enum DebugRenderObject<'a> {
     RigidBody(RigidBodyHandle, &'a RigidBody),
     /// A collider is being rendered.
     Collider(ColliderHandle, &'a Collider),
+    /// The AABB of a collider is being rendered.
+    ColliderAabb(ColliderHandle, &'a Collider, &'a Aabb),
     /// An impulse-joint is being rendered.
     ImpulseJoint(ImpulseJointHandle, &'a ImpulseJoint),
     /// A multibody joint is being rendered.
     MultibodyJoint(MultibodyJointHandle, &'a Multibody, &'a MultibodyLink),
-    /// Another element is being rendered.
-    Other,
+    /// The contacts of a contact-pair are being rendered.
+    ContactPair(&'a ContactPair, &'a Collider, &'a Collider),
+    /// A soft body's elements and edge-vs-edge contacts are being rendered.
+    SoftBody(SoftBodyHandle, &'a SoftBody),
 }
 
 /// Trait implemented by graphics backends responsible for rendering the physics scene.
@@ -28,56 +33,65 @@ pub enum DebugRenderObject<'a> {
 /// `DebugRenderStyle`. The backend is free to apply its own style, for example based on
 /// the `object` being rendered.
 pub trait DebugRenderBackend {
+    /// Predicate to filter-out some objects from the debug-rendering.
+    fn filter_object(&self, _object: DebugRenderObject) -> bool {
+        true
+    }
+
     /// Draws a colored line.
     ///
+    /// The `color` is in HSLA format: `[hue 0..=360, saturation 0..=1, lightness 0..=1,
+    /// alpha 0..=1]` (see [`DebugColor`]); convert it if the backend expects another
+    /// color space (e.g. RGBA).
+    ///
     /// Note that this method can be called multiple time for the same `object`.
-    fn draw_line(
-        &mut self,
-        object: DebugRenderObject,
-        a: Point<Real>,
-        b: Point<Real>,
-        color: [f32; 4],
-    );
+    fn draw_line(&mut self, object: DebugRenderObject, a: Vector, b: Vector, color: DebugColor);
 
-    /// Draws a set of line.
+    /// Draws a set of lines.
+    ///
+    /// The `color` is in HSLA format: `[hue 0..=360, saturation 0..=1, lightness 0..=1,
+    /// alpha 0..=1]` (see [`DebugColor`]); convert it if the backend expects another
+    /// color space (e.g. RGBA).
     fn draw_polyline(
         &mut self,
         object: DebugRenderObject,
-        vertices: &[Point<Real>],
+        vertices: &[Vector],
         indices: &[[u32; 2]],
-        transform: &Isometry<Real>,
-        scale: &Vector<Real>,
-        color: [f32; 4],
+        transform: &Pose,
+        scale: Vector,
+        color: DebugColor,
     ) {
         for idx in indices {
-            let a = transform * (Scale::from(*scale) * vertices[idx[0] as usize]);
-            let b = transform * (Scale::from(*scale) * vertices[idx[1] as usize]);
+            let a = *transform * (vertices[idx[0] as usize] * scale);
+            let b = *transform * (vertices[idx[1] as usize] * scale);
             self.draw_line(object, a, b, color);
         }
     }
 
-    /// Draws a chain of line.
+    /// Draws a chain of lines.
+    ///
+    /// The `color` is in HSLA format: `[hue 0..=360, saturation 0..=1, lightness 0..=1,
+    /// alpha 0..=1]` (see [`DebugColor`]); convert it if the backend expects another
+    /// color space (e.g. RGBA).
     fn draw_line_strip(
         &mut self,
         object: DebugRenderObject,
-        vertices: &[Point<Real>],
-        transform: &Isometry<Real>,
-        scale: &Vector<Real>,
-        color: [f32; 4],
+        vertices: &[Vector],
+        transform: &Pose,
+        scale: Vector,
+        color: DebugColor,
         closed: bool,
     ) {
         for vtx in vertices.windows(2) {
-            let a = transform * (Scale::from(*scale) * vtx[0]);
-            let b = transform * (Scale::from(*scale) * vtx[1]);
+            let a = *transform * (vtx[0] * scale);
+            let b = *transform * (vtx[1] * scale);
             self.draw_line(object, a, b, color);
         }
 
-        if closed {
-            if vertices.len() > 2 {
-                let a = transform * (Scale::from(*scale) * vertices[0]);
-                let b = transform * (Scale::from(*scale) * vertices.last().unwrap());
-                self.draw_line(object, a, b, color);
-            }
+        if closed && vertices.len() > 2 {
+            let a = *transform * (vertices[0] * scale);
+            let b = *transform * (*vertices.last().unwrap() * scale);
+            self.draw_line(object, a, b, color);
         }
     }
 }

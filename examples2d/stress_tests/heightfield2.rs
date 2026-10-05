@@ -1,0 +1,70 @@
+use rapier_testbed2d::TestbedViewer;
+use rapier2d::prelude::*;
+
+pub async fn run(viewer: &mut TestbedViewer) -> anyhow::Result<()> {
+    /*
+     * World
+     */
+    let mut world = PhysicsWorld::new();
+
+    /*
+     * Ground
+     */
+    let ground_size = Vec2::new(50.0, 1.0);
+    let nsubdivs = 2000;
+
+    let heights = (0..nsubdivs + 1)
+        .map(|i| {
+            if i == 0 || i == nsubdivs {
+                80.0
+            } else {
+                (i as f32 * ground_size.x / (nsubdivs as f32)).cos() * 2.0
+            }
+        })
+        .collect();
+
+    let rigid_body = RigidBodyBuilder::fixed();
+    let collider = ColliderBuilder::heightfield(heights, ground_size);
+    let _ = world.insert(rigid_body, collider);
+
+    /*
+     * Create the cubes
+     */
+    let num = 26;
+    let rad = 0.5;
+
+    let shift = rad * 2.0;
+    let centerx = shift * (num / 2) as f32;
+    let centery = shift / 2.0;
+
+    for i in 0..num {
+        for j in 0usize..num * 5 {
+            let x = i as f32 * shift - centerx;
+            let y = j as f32 * shift + centery + 3.0;
+
+            // Build the rigid body.
+            let rigid_body = RigidBodyBuilder::dynamic().translation(Vec2::new(x, y));
+
+            if j % 2 == 0 {
+                let collider = ColliderBuilder::cuboid(rad, rad);
+                let _ = world.insert(rigid_body, collider);
+            } else {
+                let collider = ColliderBuilder::ball(rad);
+                let _ = world.insert(rigid_body, collider);
+            }
+        }
+    }
+
+    /*
+     * Set up the viewer.
+     */
+    viewer.set_world(&mut world);
+    viewer.look_at(Vec2::new(0.0, 50.0), 10.0);
+
+    while viewer.render_frame(&mut world).await {
+        if viewer.simulating() {
+            world.step();
+        }
+    }
+    Ok(())
+}

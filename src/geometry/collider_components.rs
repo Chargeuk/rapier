@@ -1,52 +1,17 @@
+use crate::alloc_prelude::*;
 use crate::dynamics::{CoefficientCombineRule, MassProperties, RigidBodyHandle, RigidBodyType};
-use crate::geometry::{InteractionGroups, SAPProxyIndex, Shape, SharedShape};
-use crate::math::{Isometry, Real};
-use crate::parry::partitioning::IndexedData;
+use crate::geometry::{InteractionGroups, Shape, SharedShape};
+use crate::math::{Pose, Real};
 use crate::pipeline::{ActiveEvents, ActiveHooks};
-use std::ops::{Deref, DerefMut};
-
-/// The unique identifier of a collider added to a collider set.
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash, Default)]
-#[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
-#[repr(transparent)]
-pub struct ColliderHandle(pub crate::data::arena::Index);
-
-impl ColliderHandle {
-    /// Converts this handle into its (index, generation) components.
-    pub fn into_raw_parts(self) -> (u32, u32) {
-        self.0.into_raw_parts()
-    }
-
-    /// Reconstructs an handle from its (index, generation) components.
-    pub fn from_raw_parts(id: u32, generation: u32) -> Self {
-        Self(crate::data::arena::Index::from_raw_parts(id, generation))
-    }
-
-    /// An always-invalid collider handle.
-    pub fn invalid() -> Self {
-        Self(crate::data::arena::Index::from_raw_parts(
-            crate::INVALID_U32,
-            crate::INVALID_U32,
-        ))
-    }
-}
-
-impl IndexedData for ColliderHandle {
-    fn default() -> Self {
-        Self(IndexedData::default())
-    }
-
-    fn index(&self) -> usize {
-        self.0.index()
-    }
-}
+use core::ops::{Deref, DerefMut};
 
 bitflags::bitflags! {
     #[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
+    #[derive(Copy, Clone, PartialEq, Eq, Debug)]
     /// Flags describing how the collider has been modified by the user.
     pub struct ColliderChanges: u32 {
-        /// Flag indicating that any component of the collider has been modified.
-        const MODIFIED = 1 << 0;
+        /// Flag indicating that the collider handle is in the changed collider set.
+        const IN_MODIFIED_SET = 1 << 0;
         /// Flag indicating that the density or mass-properties of this collider was changed.
         const LOCAL_MASS_PROPERTIES = 1 << 1; // => RigidBody local mass-properties update.
         /// Flag indicating that the `ColliderParent` component of the collider has been modified.
@@ -66,6 +31,10 @@ bitflags::bitflags! {
         const PARENT_EFFECTIVE_DOMINANCE = 1 << 7; // NF update.
         /// Flag indicating that whether or not the collider is enabled was changed.
         const ENABLED_OR_DISABLED = 1 << 8; // BF & NF updates.
+        /// Flag indicating that the collider's shape was deformed in place (a soft-body surface
+        /// following its particles): BF & NF updates, no NF pair workspace invalidation, never
+        /// recycled.
+        const DEFORMED = 1 << 9;
     }
 }
 
@@ -79,7 +48,11 @@ impl ColliderChanges {
     /// Do these changes justify a broad-phase update?
     pub fn needs_broad_phase_update(self) -> bool {
         self.intersects(
-            ColliderChanges::PARENT | ColliderChanges::POSITION | ColliderChanges::SHAPE,
+            ColliderChanges::PARENT
+                | ColliderChanges::POSITION
+                | ColliderChanges::SHAPE
+                | ColliderChanges::ENABLED_OR_DISABLED
+                | ColliderChanges::DEFORMED,
         )
     }
 
@@ -111,32 +84,17 @@ impl ColliderType {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
-/// Data associated to a collider that takes part to a broad-phase algorithm.
-pub struct ColliderBroadPhaseData {
-    pub(crate) proxy_index: SAPProxyIndex,
-}
-
-impl Default for ColliderBroadPhaseData {
-    fn default() -> Self {
-        ColliderBroadPhaseData {
-            proxy_index: crate::INVALID_U32,
-        }
-    }
-}
-
 /// The shape of a collider.
 pub type ColliderShape = SharedShape;
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Debug)]
 #[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
 /// The mass-properties of a collider.
 pub enum ColliderMassProps {
     /// The collider is given a density.
     ///
     /// Its actual `MassProperties` are computed automatically with
-    /// the help of [`SharedShape::mass_properties`].
+    /// the help of [`Shape::mass_properties`].
     Density(Real),
     /// The collider is given a mass.
     ///
@@ -195,31 +153,31 @@ pub struct ColliderParent {
     /// Handle of the rigid-body this collider is attached to.
     pub handle: RigidBodyHandle,
     /// Const position of this collider relative to its parent rigid-body.
-    pub pos_wrt_parent: Isometry<Real>,
+    pub pos_wrt_parent: Pose,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
 /// The position of a collider.
-pub struct ColliderPosition(pub Isometry<Real>);
+pub struct ColliderPosition(pub Pose);
 
-impl AsRef<Isometry<Real>> for ColliderPosition {
+impl AsRef<Pose> for ColliderPosition {
     #[inline]
-    fn as_ref(&self) -> &Isometry<Real> {
+    fn as_ref(&self) -> &Pose {
         &self.0
     }
 }
 
-impl AsMut<Isometry<Real>> for ColliderPosition {
-    fn as_mut(&mut self) -> &mut Isometry<Real> {
+impl AsMut<Pose> for ColliderPosition {
+    fn as_mut(&mut self) -> &mut Pose {
         &mut self.0
     }
 }
 
 impl Deref for ColliderPosition {
-    type Target = Isometry<Real>;
+    type Target = Pose;
     #[inline]
-    fn deref(&self) -> &Isometry<Real> {
+    fn deref(&self) -> &Pose {
         &self.0
     }
 }
@@ -240,13 +198,13 @@ impl ColliderPosition {
     /// The identity position.
     #[must_use]
     pub fn identity() -> Self {
-        ColliderPosition(Isometry::identity())
+        ColliderPosition(Pose::IDENTITY)
     }
 }
 
 impl<T> From<T> for ColliderPosition
 where
-    Isometry<Real>: From<T>,
+    Pose: From<T>,
 {
     fn from(position: T) -> Self {
         Self(position.into())
@@ -298,29 +256,46 @@ impl Default for ColliderMaterial {
 
 bitflags::bitflags! {
     #[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
-    /// Flags affecting whether or not collision-detection happens between two colliders
-    /// depending on the type of rigid-bodies they are attached to.
+    #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
+    /// Controls which combinations of body types can collide with each other.
+    ///
+    /// By default, Rapier only detects collisions between pairs that make physical sense
+    /// (e.g., dynamic-dynamic, dynamic-fixed). Use this to customize that behavior.
+    ///
+    /// **Most users don't need to change this** - the defaults are correct for normal physics.
+    ///
+    /// ## Default behavior
+    /// - ✅ Dynamic ↔ Dynamic (moving objects collide)
+    /// - ✅ Dynamic ↔ Fixed (moving objects hit walls)
+    /// - ✅ Dynamic ↔ Kinematic (moving objects hit platforms)
+    /// - ❌ Fixed ↔ Fixed (walls don't collide with each other - waste of CPU)
+    /// - ❌ Kinematic ↔ Kinematic (platforms don't collide - they're user-controlled)
+    /// - ❌ Kinematic ↔ Fixed (platforms don't collide with walls)
+    ///
+    /// # Example
+    /// ```
+    /// # use rapier3d::prelude::*;
+    /// # let mut colliders = ColliderSet::new();
+    /// # let mut bodies = RigidBodySet::new();
+    /// # let body_handle = bodies.insert(RigidBodyBuilder::dynamic());
+    /// # let collider_handle = colliders.insert_with_parent(ColliderBuilder::ball(0.5), body_handle, &mut bodies);
+    /// # let collider = colliders.get_mut(collider_handle).unwrap();
+    /// // Enable kinematic-kinematic collisions (unusual)
+    /// let types = ActiveCollisionTypes::default() | ActiveCollisionTypes::KINEMATIC_KINEMATIC;
+    /// collider.set_active_collision_types(types);
+    /// ```
     pub struct ActiveCollisionTypes: u16 {
-        /// Enable collision-detection between a collider attached to a dynamic body
-        /// and another collider attached to a dynamic body.
+        /// Enables dynamic ↔ dynamic collision detection.
         const DYNAMIC_DYNAMIC = 0b0000_0000_0000_0001;
-        /// Enable collision-detection between a collider attached to a dynamic body
-        /// and another collider attached to a kinematic body.
+        /// Enables dynamic ↔ kinematic collision detection.
         const DYNAMIC_KINEMATIC = 0b0000_0000_0000_1100;
-        /// Enable collision-detection between a collider attached to a dynamic body
-        /// and another collider attached to a fixed body (or not attached to any body).
+        /// Enables dynamic ↔ fixed collision detection.
         const DYNAMIC_FIXED  = 0b0000_0000_0000_0010;
-        /// Enable collision-detection between a collider attached to a kinematic body
-        /// and another collider attached to a kinematic body.
+        /// Enables kinematic ↔ kinematic collision detection (rarely needed).
         const KINEMATIC_KINEMATIC = 0b1100_1100_0000_0000;
-
-        /// Enable collision-detection between a collider attached to a kinematic body
-        /// and another collider attached to a fixed body (or not attached to any body).
+        /// Enables kinematic ↔ fixed collision detection (rarely needed).
         const KINEMATIC_FIXED = 0b0010_0010_0000_0000;
-
-        /// Enable collision-detection between a collider attached to a fixed body (or
-        /// not attached to any body) and another collider attached to a fixed body (or
-        /// not attached to any body).
+        /// Enables fixed ↔ fixed collision detection (rarely needed).
         const FIXED_FIXED = 0b0000_0000_0010_0000;
     }
 }
@@ -361,8 +336,20 @@ impl ActiveCollisionTypes {
         //
         //       Because that test must be symmetric, we perform two similar tests by swapping
         //       rb_type1 and rb_type2.
-        ((self.bits >> (rb_type1 as u32 * 4)) & 0b0000_1111) & (1 << rb_type2 as u32) != 0
-            || ((self.bits >> (rb_type2 as u32 * 4)) & 0b0000_1111) & (1 << rb_type1 as u32) != 0
+
+        // Soft-frame proxies collide as dynamic bodies.
+        let rb_type1 = if rb_type1.is_soft_frame() {
+            RigidBodyType::Dynamic
+        } else {
+            rb_type1
+        };
+        let rb_type2 = if rb_type2.is_soft_frame() {
+            RigidBodyType::Dynamic
+        } else {
+            rb_type2
+        };
+        ((self.bits() >> (rb_type1 as u32 * 4)) & 0b0000_1111) & (1 << rb_type2 as u32) != 0
+            || ((self.bits() >> (rb_type2 as u32 * 4)) & 0b0000_1111) & (1 << rb_type1 as u32) != 0
     }
 }
 

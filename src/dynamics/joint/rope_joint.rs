@@ -1,25 +1,41 @@
+use crate::dynamics::integration_parameters::SpringCoefficients;
 use crate::dynamics::joint::{GenericJoint, GenericJointBuilder, JointAxesMask};
 use crate::dynamics::{JointAxis, MotorModel};
-use crate::math::{Point, Real, UnitVector};
+use crate::math::{Real, Vector};
 
-use super::{JointLimits, JointMotor};
+use super::JointMotor;
 
 #[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
 #[derive(Copy, Clone, Debug, PartialEq)]
 #[repr(transparent)]
-/// A rope joint, limits the maximum distance between two bodies
+/// A distance-limiting joint (like a rope or cable connecting two objects).
+///
+/// Rope joints keep two bodies from getting too far apart, but allow them to get closer.
+/// They only apply force when stretched to their maximum length. Use for:
+/// - Ropes and chains
+/// - Cables and tethers
+/// - Leashes
+/// - Grappling hooks
+/// - Maximum distance constraints
+///
+/// Unlike spring joints, rope joints are inelastic - they don't bounce or stretch smoothly,
+/// they just enforce a hard maximum distance.
 pub struct RopeJoint {
     /// The underlying joint data.
     pub data: GenericJoint,
 }
 
 impl RopeJoint {
-    /// Creates a new rope joint limiting the max distance between to bodies
-    pub fn new() -> Self {
-        let data = GenericJointBuilder::new(JointAxesMask::FREE_FIXED_AXES)
+    /// Creates a new rope joint limiting the max distance between two bodies.
+    ///
+    /// The `max_dist` must be strictly greater than 0.0.
+    pub fn new(max_dist: Real) -> Self {
+        let data = GenericJointBuilder::new(JointAxesMask::empty())
             .coupled_axes(JointAxesMask::LIN_AXES)
             .build();
-        Self { data }
+        let mut result = Self { data };
+        result.set_max_distance(max_dist);
+        result
     }
 
     /// The underlying generic joint.
@@ -40,49 +56,25 @@ impl RopeJoint {
 
     /// The joint’s anchor, expressed in the local-space of the first rigid-body.
     #[must_use]
-    pub fn local_anchor1(&self) -> Point<Real> {
+    pub fn local_anchor1(&self) -> Vector {
         self.data.local_anchor1()
     }
 
     /// Sets the joint’s anchor, expressed in the local-space of the first rigid-body.
-    pub fn set_local_anchor1(&mut self, anchor1: Point<Real>) -> &mut Self {
+    pub fn set_local_anchor1(&mut self, anchor1: Vector) -> &mut Self {
         self.data.set_local_anchor1(anchor1);
         self
     }
 
     /// The joint’s anchor, expressed in the local-space of the second rigid-body.
     #[must_use]
-    pub fn local_anchor2(&self) -> Point<Real> {
+    pub fn local_anchor2(&self) -> Vector {
         self.data.local_anchor2()
     }
 
     /// Sets the joint’s anchor, expressed in the local-space of the second rigid-body.
-    pub fn set_local_anchor2(&mut self, anchor2: Point<Real>) -> &mut Self {
+    pub fn set_local_anchor2(&mut self, anchor2: Vector) -> &mut Self {
         self.data.set_local_anchor2(anchor2);
-        self
-    }
-
-    /// The principal axis of the joint, expressed in the local-space of the first rigid-body.
-    #[must_use]
-    pub fn local_axis1(&self) -> UnitVector<Real> {
-        self.data.local_axis1()
-    }
-
-    /// Sets the principal axis of the joint, expressed in the local-space of the first rigid-body.
-    pub fn set_local_axis1(&mut self, axis1: UnitVector<Real>) -> &mut Self {
-        self.data.set_local_axis1(axis1);
-        self
-    }
-
-    /// The principal axis of the joint, expressed in the local-space of the second rigid-body.
-    #[must_use]
-    pub fn local_axis2(&self) -> UnitVector<Real> {
-        self.data.local_axis2()
-    }
-
-    /// Sets the principal axis of the joint, expressed in the local-space of the second rigid-body.
-    pub fn set_local_axis2(&mut self, axis2: UnitVector<Real>) -> &mut Self {
-        self.data.set_local_axis2(axis2);
         self
     }
 
@@ -94,22 +86,14 @@ impl RopeJoint {
 
     /// Set the spring-like model used by the motor to reach the desired target velocity and position.
     pub fn set_motor_model(&mut self, model: MotorModel) -> &mut Self {
-        self.data.set_motor_model(JointAxis::X, model);
-        self.data.set_motor_model(JointAxis::Y, model);
-        #[cfg(feature = "dim3")]
-        self.data.set_motor_model(JointAxis::Z, model);
+        self.data.set_motor_model(JointAxis::LinX, model);
         self
     }
 
     /// Sets the target velocity this motor needs to reach.
     pub fn set_motor_velocity(&mut self, target_vel: Real, factor: Real) -> &mut Self {
         self.data
-            .set_motor_velocity(JointAxis::X, target_vel, factor);
-        self.data
-            .set_motor_velocity(JointAxis::Y, target_vel, factor);
-        #[cfg(feature = "dim3")]
-        self.data
-            .set_motor_velocity(JointAxis::Z, target_vel, factor);
+            .set_motor_velocity(JointAxis::LinX, target_vel, factor);
         self
     }
 
@@ -121,12 +105,7 @@ impl RopeJoint {
         damping: Real,
     ) -> &mut Self {
         self.data
-            .set_motor_position(JointAxis::X, target_pos, stiffness, damping);
-        self.data
-            .set_motor_position(JointAxis::Y, target_pos, stiffness, damping);
-        #[cfg(feature = "dim3")]
-        self.data
-            .set_motor_position(JointAxis::Z, target_pos, stiffness, damping);
+            .set_motor_position(JointAxis::LinX, target_pos, stiffness, damping);
         self
     }
 
@@ -139,43 +118,60 @@ impl RopeJoint {
         damping: Real,
     ) -> &mut Self {
         self.data
-            .set_motor(JointAxis::X, target_pos, target_vel, stiffness, damping);
-        self.data
-            .set_motor(JointAxis::Y, target_pos, target_vel, stiffness, damping);
-        #[cfg(feature = "dim3")]
-        self.data
-            .set_motor(JointAxis::Y, target_pos, target_vel, stiffness, damping);
+            .set_motor(JointAxis::LinX, target_pos, target_vel, stiffness, damping);
         self
     }
 
     /// Sets the maximum force the motor can deliver.
     pub fn set_motor_max_force(&mut self, max_force: Real) -> &mut Self {
-        self.data.set_motor_max_force(JointAxis::X, max_force);
-        self.data.set_motor_max_force(JointAxis::Y, max_force);
-        #[cfg(feature = "dim3")]
-        self.data.set_motor_max_force(JointAxis::Z, max_force);
+        self.data.set_motor_max_force(JointAxis::LinX, max_force);
         self
     }
 
-    /// The limit maximum distance attached bodies can translate.
+    /// The maximum rope length (distance between anchor points).
+    ///
+    /// Bodies can get closer but not farther than this distance.
     #[must_use]
-    pub fn limits(&self, axis: JointAxis) -> Option<&JointLimits<Real>> {
-        self.data.limits(axis)
+    pub fn max_distance(&self) -> Real {
+        self.data
+            .limits(JointAxis::LinX)
+            .map(|l| l.max)
+            .unwrap_or(Real::MAX)
     }
 
-    /// Sets the `[min,max]` limit distances attached bodies can translate.
-    pub fn set_limits(&mut self, limits: [Real; 2]) -> &mut Self {
-        self.data.set_limits(JointAxis::X, limits);
-        self.data.set_limits(JointAxis::Y, limits);
-        #[cfg(feature = "dim3")]
-        self.data.set_limits(JointAxis::Z, limits);
+    /// Changes the maximum rope length.
+    ///
+    /// Must be greater than 0.0. Bodies will be pulled together if farther apart.
+    ///
+    /// # Example
+    /// ```
+    /// # use rapier3d::prelude::*;
+    /// # use rapier3d::dynamics::RopeJoint;
+    /// # let mut rope_joint = RopeJoint::new(5.0);
+    /// rope_joint.set_max_distance(10.0);  // Max 10 units apart
+    /// ```
+    pub fn set_max_distance(&mut self, max_dist: Real) -> &mut Self {
+        self.data.set_limits(JointAxis::LinX, [0.0, max_dist]);
+        self
+    }
+
+    /// Gets the softness of this joint’s locked degrees of freedom.
+    #[must_use]
+    pub fn softness(&self) -> SpringCoefficients<Real> {
+        self.data.softness
+    }
+
+    /// Sets the softness of this joint’s locked degrees of freedom.
+    #[must_use]
+    pub fn set_softness(&mut self, softness: SpringCoefficients<Real>) -> &mut Self {
+        self.data.softness = softness;
         self
     }
 }
 
-impl Into<GenericJoint> for RopeJoint {
-    fn into(self) -> GenericJoint {
-        self.data
+impl From<RopeJoint> for GenericJoint {
+    fn from(val: RopeJoint) -> GenericJoint {
+        val.data
     }
 }
 
@@ -188,10 +184,8 @@ pub struct RopeJointBuilder(pub RopeJoint);
 
 impl RopeJointBuilder {
     /// Creates a new builder for rope joints.
-    ///
-    /// This axis is expressed in the local-space of both rigid-bodies.
-    pub fn new() -> Self {
-        Self(RopeJoint::new())
+    pub fn new(max_dist: Real) -> Self {
+        Self(RopeJoint::new(max_dist))
     }
 
     /// Sets whether contacts between the attached rigid-bodies are enabled.
@@ -203,29 +197,15 @@ impl RopeJointBuilder {
 
     /// Sets the joint’s anchor, expressed in the local-space of the first rigid-body.
     #[must_use]
-    pub fn local_anchor1(mut self, anchor1: Point<Real>) -> Self {
+    pub fn local_anchor1(mut self, anchor1: Vector) -> Self {
         self.0.set_local_anchor1(anchor1);
         self
     }
 
     /// Sets the joint’s anchor, expressed in the local-space of the second rigid-body.
     #[must_use]
-    pub fn local_anchor2(mut self, anchor2: Point<Real>) -> Self {
+    pub fn local_anchor2(mut self, anchor2: Vector) -> Self {
         self.0.set_local_anchor2(anchor2);
-        self
-    }
-
-    /// Sets the principal axis of the joint, expressed in the local-space of the first rigid-body.
-    #[must_use]
-    pub fn local_axis1(mut self, axis1: UnitVector<Real>) -> Self {
-        self.0.set_local_axis1(axis1);
-        self
-    }
-
-    /// Sets the principal axis of the joint, expressed in the local-space of the second rigid-body.
-    #[must_use]
-    pub fn local_axis2(mut self, axis2: UnitVector<Real>) -> Self {
-        self.0.set_local_axis2(axis2);
         self
     }
 
@@ -270,10 +250,19 @@ impl RopeJointBuilder {
         self
     }
 
-    /// Sets the `[min,max]` limit distances attached bodies can translate.
+    /// Sets the maximum allowed distance between the attached bodies.
+    ///
+    /// The `max_dist` must be strictly greater than 0.0.
     #[must_use]
-    pub fn limits(mut self, limits: [Real; 2]) -> Self {
-        self.0.set_limits(limits);
+    pub fn max_distance(mut self, max_dist: Real) -> Self {
+        self.0.set_max_distance(max_dist);
+        self
+    }
+
+    /// Sets the softness of this joint’s locked degrees of freedom.
+    #[must_use]
+    pub fn softness(mut self, softness: SpringCoefficients<Real>) -> Self {
+        self.0.data.softness = softness;
         self
     }
 
@@ -284,8 +273,8 @@ impl RopeJointBuilder {
     }
 }
 
-impl Into<GenericJoint> for RopeJointBuilder {
-    fn into(self) -> GenericJoint {
-        self.0.into()
+impl From<RopeJointBuilder> for GenericJoint {
+    fn from(val: RopeJointBuilder) -> GenericJoint {
+        val.0.into()
     }
 }

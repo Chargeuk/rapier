@@ -1,0 +1,62 @@
+use rapier_testbed3d::TestbedViewer;
+use rapier3d::prelude::*;
+
+pub async fn run(viewer: &mut TestbedViewer) -> anyhow::Result<()> {
+    /*
+     * World
+     */
+    let mut world = PhysicsWorld::new();
+
+    /*
+     * Ground
+     */
+    let ground_size = 200.1;
+    let ground_height = 0.1;
+
+    let rigid_body = RigidBodyBuilder::fixed().translation(Vec3::new(0.0, -ground_height, 0.0));
+    let collider = ColliderBuilder::cuboid(ground_size, ground_height, ground_size);
+    world.insert(rigid_body, collider);
+
+    /*
+     * Create the cubes
+     */
+    let num = 10;
+    let rad = 1.0;
+
+    let shift = rad * 2.0;
+    let centerx = shift * (num / 2) as f32;
+    let centery = shift / 2.0;
+    let centerz = shift * (num / 2) as f32;
+
+    let mut offset = -(num as f32) * (rad * 2.0) * 0.5;
+
+    for j in 0usize..num {
+        for i in 0..num {
+            for k in 0usize..num {
+                let x = i as f32 * shift - centerx + offset;
+                let y = j as f32 * shift + centery;
+                let z = k as f32 * shift - centerz + offset;
+
+                // Build the rigid body.
+                let rigid_body = RigidBodyBuilder::dynamic().translation(Vec3::new(x, y, z));
+                let collider = ColliderBuilder::cuboid(rad, rad, rad);
+                world.insert(rigid_body, collider);
+            }
+        }
+
+        offset -= 0.05 * rad * (num as f32 - 1.0);
+    }
+
+    /*
+     * Set up the testbed.
+     */
+    viewer.set_world(&mut world);
+    viewer.look_at(Vec3::new(100.0, 100.0, 100.0), Vec3::ZERO);
+
+    while viewer.render_frame(&mut world).await {
+        if viewer.simulating() {
+            world.step();
+        }
+    }
+    Ok(())
+}

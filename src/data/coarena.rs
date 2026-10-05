@@ -1,3 +1,4 @@
+use crate::alloc_prelude::*;
 use crate::data::arena::Index;
 
 #[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
@@ -11,6 +12,11 @@ impl<T> Coarena<T> {
     /// A coarena with no element.
     pub fn new() -> Self {
         Self { data: Vec::new() }
+    }
+
+    /// Pre-allocates capacity for `additional` extra elements in this arena.
+    pub fn reserve(&mut self, additional: usize) {
+        self.data.reserve(additional);
     }
 
     /// Iterates through all the elements of this coarena.
@@ -30,8 +36,19 @@ impl<T> Coarena<T> {
         self.data.get(index as usize).map(|(_, t)| t)
     }
 
+    /// Gets a specific mutable element from the coarena without specifying its generation number.
+    ///
+    /// It is strongly encouraged to use `Coarena::get_mut` instead of this method because this method
+    /// can suffer from the ABA problem.
+    pub fn get_mut_unknown_gen(&mut self, index: u32) -> Option<&mut T> {
+        self.data.get_mut(index as usize).map(|(_, t)| t)
+    }
+
+    #[allow(dead_code)]
     pub(crate) fn get_gen(&self, index: u32) -> Option<u32> {
-        self.data.get(index as usize).map(|(gen, _)| *gen)
+        self.data
+            .get(index as usize)
+            .map(|(generation, _)| *generation)
     }
 
     /// Deletes an element for the coarena and returns its value.
@@ -42,7 +59,7 @@ impl<T> Coarena<T> {
         let data = self.data.get_mut(i as usize)?;
         if g == data.0 {
             data.0 = u32::MAX; // invalidate the generation number.
-            Some(std::mem::replace(&mut data.1, removed_value))
+            Some(core::mem::replace(&mut data.1, removed_value))
         } else {
             None
         }
@@ -78,7 +95,7 @@ impl<T> Coarena<T> {
         self.data[i1 as usize] = (g1, value);
     }
 
-    /// Ensure that the given element exists in thihs coarena, and return its mutable reference.
+    /// Ensure that the given element exists in this coarena, and return its mutable reference.
     pub fn ensure_element_exist(&mut self, a: Index, default: T) -> &mut T
     where
         T: Clone,
@@ -99,7 +116,7 @@ impl<T> Coarena<T> {
         &mut data.1
     }
 
-    /// Ensure that elements at the two given indices exist in this coarena, and return their reference.
+    /// Ensure that elements at the two given indices exist in this coarena, and return their references.
     ///
     /// Missing elements are created automatically and initialized with the `default` value.
     pub fn ensure_pair_exists(&mut self, a: Index, b: Index, default: T) -> (&mut T, &mut T)

@@ -1,0 +1,62 @@
+use rapier_testbed3d::TestbedViewer;
+use rapier3d::prelude::*;
+
+pub async fn run(viewer: &mut TestbedViewer) -> anyhow::Result<()> {
+    /*
+     * World
+     */
+    let mut world = PhysicsWorld::new();
+
+    /*
+     * Create the balls
+     */
+    let num_j = 10;
+    let num_ik = 10;
+    let rad = 0.5;
+
+    let shift = rad * 2.0;
+    let centerx = shift * (num_ik as f32) / 2.0;
+    let centery = shift / 2.0;
+    let centerz = shift * (num_ik as f32) / 2.0;
+
+    for i in 0..num_ik {
+        for j in 0usize..num_j {
+            for k in 0..num_ik {
+                let x = i as f32 * shift - centerx;
+                let z = k as f32 * shift - centerz;
+
+                let status = if j == 0 || i == 0 || k == 0 || i == num_ik - 1 || k == num_ik - 1 {
+                    RigidBodyType::Fixed
+                } else {
+                    RigidBodyType::Dynamic
+                };
+
+                let y = if status.is_fixed() {
+                    j as f32 * shift + centery
+                } else {
+                    j as f32 * shift * 2.0 + centery
+                };
+
+                // Build the rigid body.
+                let rigid_body = RigidBodyBuilder::new(status)
+                    .translation(Vector::new(x, y, z))
+                    .can_sleep(false);
+                let collider = ColliderBuilder::ball(rad).friction(0.0);
+                let (_handle, _) = world.insert(rigid_body, collider);
+            }
+        }
+    }
+
+    /*
+     * Set up the testbed.
+     */
+    viewer.set_world(&mut world);
+    viewer.look_at(Vec3::new(100.0, 100.0, 100.0), Vec3::ZERO);
+
+    while viewer.render_frame(&mut world).await {
+        if viewer.simulating() {
+            world.step();
+        }
+    }
+    Ok(())
+}

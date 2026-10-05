@@ -1,21 +1,39 @@
 //! Physics pipeline structures.
 
-use crate::dynamics::{ImpulseJointSet, MultibodyJointSet};
+use crate::alloc_prelude::*;
+
+use crate::dynamics::{
+    ImpulseJointSet, IntegrationParameters, IslandManager, MultibodyJointSet, RigidBodyChanges,
+};
 use crate::geometry::{
-    BroadPhase, BroadPhasePairEvent, ColliderChanges, ColliderHandle, ColliderPair, NarrowPhase,
+    BroadPhaseBvh, BroadPhasePairEvent, ColliderChanges, ColliderHandle, ModifiedColliders,
+    NarrowPhase,
 };
 use crate::math::Real;
-use crate::pipeline::{EventHandler, PhysicsHooks, QueryPipeline};
+use crate::pipeline::{EventHandler, PhysicsHooks};
+use crate::prelude::ModifiedRigidBodies;
 use crate::{dynamics::RigidBodySet, geometry::ColliderSet};
 
-/// The collision pipeline, responsible for performing collision detection between colliders.
+/// A collision detection pipeline that can be used without full physics simulation.
 ///
-/// This structure only contains temporary data buffers. It can be dropped and replaced by a fresh
-/// copy at any time. For performance reasons it is recommended to reuse the same physics pipeline
-/// instance to benefit from the cached data.
+/// This runs only collision detection (broad-phase + narrow-phase) without dynamics/forces.
+/// Use when you want to detect collisions but don't need physics simulation.
+///
+/// **For full physics**, use [`PhysicsPipeline`](crate::pipeline::PhysicsPipeline) instead which includes this internally.
+///
+/// ## Use cases
+///
+/// - Collision detection in a non-physics game
+/// - Custom physics integration where you handle forces yourself
+/// - Debugging collision detection separately from dynamics
+///
+/// Like PhysicsPipeline, this only holds temporary buffers. Reuse the same instance for performance.
+///
+/// Bodies are never integrated: their contacts are updated on the steps you move them (or modify
+/// their colliders). There is no sleeping either, so the [`IslandManager`] passed to
+/// [`Self::step`] stays empty (bodies are never registered in it).
 // NOTE: this contains only workspace data, so there is no point in making this serializable.
 pub struct CollisionPipeline {
-    broadphase_collider_pairs: Vec<ColliderPair>,
     broad_phase_events: Vec<BroadPhasePairEvent>,
 }
 
@@ -35,7 +53,6 @@ impl CollisionPipeline {
     /// Initializes a new physics pipeline.
     pub fn new() -> CollisionPipeline {
         CollisionPipeline {
-            broadphase_collider_pairs: Vec::new(),
             broad_phase_events: Vec::new(),
         }
     }
@@ -43,7 +60,8 @@ impl CollisionPipeline {
     fn detect_collisions(
         &mut self,
         prediction_distance: Real,
-        broad_phase: &mut BroadPhase,
+        islands: &mut IslandManager,
+        broad_phase: &mut BroadPhaseBvh,
         narrow_phase: &mut NarrowPhase,
         bodies: &mut RigidBodySet,
         colliders: &mut ColliderSet,
@@ -55,11 +73,17 @@ impl CollisionPipeline {
     ) {
         // Update broad-phase.
         self.broad_phase_events.clear();
-        self.broadphase_collider_pairs.clear();
+
+        let params = IntegrationParameters {
+            normalized_prediction_distance: prediction_distance,
+            dt: 0.0,
+            ..Default::default()
+        };
 
         broad_phase.update(
-            prediction_distance,
+            &params,
             colliders,
+            bodies,
             modified_colliders,
             removed_colliders,
             &mut self.broad_phase_events,
@@ -80,6 +104,10 @@ impl CollisionPipeline {
         narrow_phase.register_pairs(None, colliders, bodies, &self.broad_phase_events, events);
         narrow_phase.compute_contacts(
             prediction_distance,
+            0.0,
+            false,
+            0.0,
+            islands,
             bodies,
             colliders,
             &ImpulseJointSet::new(),
@@ -87,35 +115,62 @@ impl CollisionPipeline {
             modified_colliders,
             hooks,
             events,
+            None,
         );
-        narrow_phase.compute_intersections(bodies, colliders, modified_colliders, hooks, events);
+        narrow_phase.compute_intersections(
+            islands,
+            bodies,
+            colliders,
+            modified_colliders,
+            hooks,
+            events,
+        );
     }
 
     fn clear_modified_colliders(
         &mut self,
         colliders: &mut ColliderSet,
-        modified_colliders: &mut Vec<ColliderHandle>,
+        modified_colliders: &mut ModifiedColliders,
     ) {
-        for handle in modified_colliders.drain(..) {
-            if let Some(co) = colliders.get_mut_internal(handle) {
+        for handle in modified_colliders.iter() {
+            if let Some(co) = colliders.get_mut_internal(*handle) {
                 co.changes = ColliderChanges::empty();
             }
         }
+
+        modified_colliders.clear();
+    }
+
+    fn clear_modified_bodies(
+        &mut self,
+        bodies: &mut RigidBodySet,
+        modified_bodies: &mut ModifiedRigidBodies,
+    ) {
+        // Without this, a body modified by the user keeps its MODIFIED flag forever, so
+        // `RigidBodySet::get_mut` never re-inserts it into the modified set and later user
+        // changes stop propagating to its colliders (same as `PhysicsPipeline`).
+        for handle in modified_bodies.iter() {
+            if let Some(rb) = bodies.get_mut_internal(*handle) {
+                rb.changes = RigidBodyChanges::empty();
+            }
+        }
+
+        modified_bodies.clear();
     }
 
     /// Executes one step of the collision detection.
     pub fn step(
         &mut self,
         prediction_distance: Real,
-        broad_phase: &mut BroadPhase,
+        islands: &mut IslandManager,
+        broad_phase: &mut BroadPhaseBvh,
         narrow_phase: &mut NarrowPhase,
         bodies: &mut RigidBodySet,
         colliders: &mut ColliderSet,
-        query_pipeline: Option<&mut QueryPipeline>,
         hooks: &dyn PhysicsHooks,
         events: &dyn EventHandler,
     ) {
-        let modified_bodies = bodies.take_modified();
+        let mut modified_bodies = bodies.take_modified();
         let mut modified_colliders = colliders.take_modified();
         let mut removed_colliders = colliders.take_removed();
 
@@ -144,22 +199,20 @@ impl CollisionPipeline {
 
         self.detect_collisions(
             prediction_distance,
+            islands,
             broad_phase,
             narrow_phase,
             bodies,
             colliders,
             &modified_colliders[..],
-            &mut removed_colliders,
+            &removed_colliders,
             hooks,
             events,
             true,
         );
 
-        if let Some(queries) = query_pipeline {
-            queries.update_incremental(colliders, &modified_colliders, &removed_colliders, true);
-        }
-
         self.clear_modified_colliders(colliders, &mut modified_colliders);
+        self.clear_modified_bodies(bodies, &mut modified_bodies);
         removed_colliders.clear();
     }
 }
@@ -192,25 +245,26 @@ mod tests {
         let _ = collider_set.insert(collider_b);
 
         let integration_parameters = IntegrationParameters::default();
-        let mut broad_phase = BroadPhase::new();
+        let mut islands = IslandManager::new();
+        let mut broad_phase = BroadPhaseBvh::new();
         let mut narrow_phase = NarrowPhase::new();
         let mut collision_pipeline = CollisionPipeline::new();
         let physics_hooks = ();
 
         collision_pipeline.step(
-            integration_parameters.prediction_distance,
+            integration_parameters.prediction_distance(),
+            &mut islands,
             &mut broad_phase,
             &mut narrow_phase,
             &mut rigid_body_set,
             &mut collider_set,
-            None,
             &physics_hooks,
             &(),
         );
 
         let mut hit = false;
 
-        for (_, _, intersecting) in narrow_phase.intersections_with(a_handle) {
+        for (_, _, intersecting) in narrow_phase.intersection_pairs_with(a_handle) {
             if intersecting {
                 hit = true;
             }
@@ -244,25 +298,26 @@ mod tests {
         let _ = collider_set.insert(collider_b);
 
         let integration_parameters = IntegrationParameters::default();
-        let mut broad_phase = BroadPhase::new();
+        let mut islands = IslandManager::new();
+        let mut broad_phase = BroadPhaseBvh::new();
         let mut narrow_phase = NarrowPhase::new();
         let mut collision_pipeline = CollisionPipeline::new();
         let physics_hooks = ();
 
         collision_pipeline.step(
-            integration_parameters.prediction_distance,
+            integration_parameters.prediction_distance(),
+            &mut islands,
             &mut broad_phase,
             &mut narrow_phase,
             &mut rigid_body_set,
             &mut collider_set,
-            None,
             &physics_hooks,
             &(),
         );
 
         let mut hit = false;
 
-        for (_, _, intersecting) in narrow_phase.intersections_with(a_handle) {
+        for (_, _, intersecting) in narrow_phase.intersection_pairs_with(a_handle) {
             if intersecting {
                 hit = true;
             }

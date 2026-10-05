@@ -1,23 +1,27 @@
 use crate::counters::Timer;
-use std::fmt::{Display, Formatter, Result};
+use core::fmt::{Display, Formatter, Result};
 
 /// Performance counters related to constraints resolution.
-#[derive(Default, Clone, Copy)]
+#[derive(Default, Clone, Copy, Debug)]
 pub struct SolverCounters {
-    /// Number of constraints generated.
+    /// Number of contact manifolds and impulse joints handed to the constraints solver (summed
+    /// over the CCD substeps). Sleeping bodies' contacts and joints aren't counted.
     pub nconstraints: usize,
-    /// Number of contacts found.
+    /// Number of contact points handed to the constraints solver, soft-body contacts included
+    /// (summed over the CCD substeps).
     pub ncontacts: usize,
     /// Time spent for the resolution of the constraints (force computation).
     pub velocity_resolution_time: Timer,
     /// Time spent for the assembly of all the velocity constraints.
     pub velocity_assembly_time: Timer,
+    /// Time spent by the velocity assembly for initializing solver bodies.
+    pub velocity_assembly_time_solver_bodies: Timer,
+    /// Time spent by the velocity assemble for initializing the constraints.
+    pub velocity_assembly_time_constraints_init: Timer,
     /// Time spent for the update of the velocity of the bodies.
     pub velocity_update_time: Timer,
-    /// Time spent for the assembly of all the position constraints.
-    pub position_assembly_time: Timer,
-    /// Time spent for the update of the position of the bodies.
-    pub position_resolution_time: Timer,
+    /// Time spent to write force back to user-accessible data.
+    pub velocity_writeback_time: Timer,
 }
 
 impl SolverCounters {
@@ -27,10 +31,11 @@ impl SolverCounters {
             nconstraints: 0,
             ncontacts: 0,
             velocity_assembly_time: Timer::new(),
+            velocity_assembly_time_solver_bodies: Timer::new(),
+            velocity_assembly_time_constraints_init: Timer::new(),
             velocity_resolution_time: Timer::new(),
             velocity_update_time: Timer::new(),
-            position_assembly_time: Timer::new(),
-            position_resolution_time: Timer::new(),
+            velocity_writeback_time: Timer::new(),
         }
     }
 
@@ -40,9 +45,10 @@ impl SolverCounters {
         self.ncontacts = 0;
         self.velocity_resolution_time.reset();
         self.velocity_assembly_time.reset();
+        self.velocity_assembly_time_solver_bodies.reset();
+        self.velocity_assembly_time_constraints_init.reset();
         self.velocity_update_time.reset();
-        self.position_assembly_time.reset();
-        self.position_resolution_time.reset();
+        self.velocity_writeback_time.reset();
     }
 }
 
@@ -57,11 +63,10 @@ impl Display for SolverCounters {
             self.velocity_resolution_time
         )?;
         writeln!(f, "Velocity update time: {}", self.velocity_update_time)?;
-        writeln!(f, "Position assembly time: {}", self.position_assembly_time)?;
         writeln!(
             f,
-            "Position resolution time: {}",
-            self.position_resolution_time
+            "Velocity writeback time: {}",
+            self.velocity_writeback_time
         )
     }
 }

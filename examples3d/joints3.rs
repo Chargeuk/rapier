@@ -1,112 +1,96 @@
+use rapier_testbed3d::TestbedViewer;
 use rapier3d::prelude::*;
-use rapier_testbed3d::Testbed;
 
-fn create_coupled_joints(
-    bodies: &mut RigidBodySet,
-    colliders: &mut ColliderSet,
-    impulse_joints: &mut ImpulseJointSet,
-    multibody_joints: &mut MultibodyJointSet,
-    origin: Point<f32>,
-    use_articulations: bool,
-) {
-    let ground = bodies.insert(RigidBodyBuilder::fixed().translation(origin.coords));
-    let body1 = bodies.insert(
+fn create_coupled_joints(world: &mut PhysicsWorld, origin: Vector, use_articulations: bool) {
+    let ground = world.insert_body(RigidBodyBuilder::fixed().translation(origin));
+    let (body1, _) = world.insert(
         RigidBodyBuilder::dynamic()
-            .translation(origin.coords)
-            .linvel(vector![5.0, 5.0, 5.0]),
+            .translation(origin)
+            .linvel(Vector::new(5.0, 5.0, 5.0)),
+        ColliderBuilder::cuboid(1.0, 1.0, 1.0),
     );
-    colliders.insert_with_parent(ColliderBuilder::cuboid(1.0, 1.0, 1.0), body1, bodies);
 
     let joint1 = GenericJointBuilder::new(JointAxesMask::empty())
-        .limits(JointAxis::X, [-3.0, 3.0])
-        .limits(JointAxis::Y, [0.0, 3.0])
-        .limits(JointAxis::Z, [0.0, 3.0])
-        .coupled_axes(JointAxesMask::Y | JointAxesMask::Z);
+        .limits(JointAxis::LinX, [-3.0, 3.0])
+        .limits(JointAxis::LinY, [0.0, 3.0])
+        .coupled_axes(JointAxesMask::LIN_Y | JointAxesMask::LIN_Z);
 
     if use_articulations {
-        multibody_joints.insert(ground, body1, joint1, true);
+        world.insert_multibody_joint(ground, body1, joint1);
     } else {
-        impulse_joints.insert(ground, body1, joint1, true);
+        world.insert_impulse_joint(ground, body1, joint1);
     }
 }
 
 fn create_prismatic_joints(
-    bodies: &mut RigidBodySet,
-    colliders: &mut ColliderSet,
-    impulse_joints: &mut ImpulseJointSet,
-    multibody_joints: &mut MultibodyJointSet,
-    origin: Point<f32>,
+    world: &mut PhysicsWorld,
+    origin: Vector,
     num: usize,
     use_articulations: bool,
 ) {
     let rad = 0.4;
     let shift = 2.0;
 
-    let ground = RigidBodyBuilder::fixed().translation(vector![origin.x, origin.y, origin.z]);
-    let mut curr_parent = bodies.insert(ground);
+    let ground = RigidBodyBuilder::fixed().translation(origin);
     let collider = ColliderBuilder::cuboid(rad, rad, rad);
-    colliders.insert_with_parent(collider, curr_parent, bodies);
+    let (mut curr_parent, _) = world.insert(ground, collider);
 
     for i in 0..num {
         let z = origin.z + (i + 1) as f32 * shift;
-        let rigid_body = RigidBodyBuilder::dynamic().translation(vector![origin.x, origin.y, z]);
-        let curr_child = bodies.insert(rigid_body);
+        let rigid_body =
+            RigidBodyBuilder::dynamic().translation(Vector::new(origin.x, origin.y, z));
         let collider = ColliderBuilder::cuboid(rad, rad, rad);
-        colliders.insert_with_parent(collider, curr_child, bodies);
+        let (curr_child, _) = world.insert(rigid_body, collider);
 
         let axis = if i % 2 == 0 {
-            UnitVector::new_normalize(vector![1.0f32, 1.0, 0.0])
+            Vector::new(1.0f32, 1.0, 0.0).normalize()
         } else {
-            UnitVector::new_normalize(vector![-1.0f32, 1.0, 0.0])
+            Vector::new(-1.0f32, 1.0, 0.0).normalize()
         };
 
         let prism = PrismaticJointBuilder::new(axis)
-            .local_anchor1(point![0.0, 0.0, 0.0])
-            .local_anchor2(point![0.0, 0.0, -shift])
+            .local_anchor1(Vector::new(0.0, 0.0, 0.0))
+            .local_anchor2(Vector::new(0.0, 0.0, -shift))
             .limits([-2.0, 2.0]);
 
         if use_articulations {
-            multibody_joints.insert(curr_parent, curr_child, prism, true);
+            world.insert_multibody_joint(curr_parent, curr_child, prism);
         } else {
-            impulse_joints.insert(curr_parent, curr_child, prism, true);
+            world.insert_impulse_joint(curr_parent, curr_child, prism);
         }
         curr_parent = curr_child;
     }
 }
 
 fn create_actuated_prismatic_joints(
-    bodies: &mut RigidBodySet,
-    colliders: &mut ColliderSet,
-    impulse_joints: &mut ImpulseJointSet,
-    multibody_joints: &mut MultibodyJointSet,
-    origin: Point<f32>,
+    world: &mut PhysicsWorld,
+    origin: Vector,
     num: usize,
     use_articulations: bool,
 ) {
     let rad = 0.4;
     let shift = 2.0;
 
-    let ground = RigidBodyBuilder::fixed().translation(vector![origin.x, origin.y, origin.z]);
-    let mut curr_parent = bodies.insert(ground);
+    let ground = RigidBodyBuilder::fixed().translation(origin);
     let collider = ColliderBuilder::cuboid(rad, rad, rad);
-    colliders.insert_with_parent(collider, curr_parent, bodies);
+    let (mut curr_parent, _) = world.insert(ground, collider);
 
     for i in 0..num {
         let z = origin.z + (i + 1) as f32 * shift;
-        let rigid_body = RigidBodyBuilder::dynamic().translation(vector![origin.x, origin.y, z]);
-        let curr_child = bodies.insert(rigid_body);
+        let rigid_body =
+            RigidBodyBuilder::dynamic().translation(Vector::new(origin.x, origin.y, z));
         let collider = ColliderBuilder::cuboid(rad, rad, rad);
-        colliders.insert_with_parent(collider, curr_child, bodies);
+        let (curr_child, _) = world.insert(rigid_body, collider);
 
         let axis = if i % 2 == 0 {
-            UnitVector::new_normalize(vector![1.0, 1.0, 0.0])
+            Vector::new(1.0, 1.0, 0.0).normalize()
         } else {
-            UnitVector::new_normalize(vector![-1.0, 1.0, 0.0])
+            Vector::new(-1.0, 1.0, 0.0).normalize()
         };
 
         let mut prism = PrismaticJointBuilder::new(axis)
-            .local_anchor1(point![0.0, 0.0, shift])
-            .local_anchor2(point![0.0, 0.0, 0.0])
+            .local_anchor1(Vector::new(0.0, 0.0, shift))
+            .local_anchor2(Vector::new(0.0, 0.0, 0.0))
             .build();
 
         if i == 0 {
@@ -130,9 +114,9 @@ fn create_actuated_prismatic_joints(
         }
 
         if use_articulations {
-            multibody_joints.insert(curr_parent, curr_child, prism, true);
+            world.insert_multibody_joint(curr_parent, curr_child, prism);
         } else {
-            impulse_joints.insert(curr_parent, curr_child, prism, true);
+            world.insert_impulse_joint(curr_parent, curr_child, prism);
         }
 
         curr_parent = curr_child;
@@ -140,60 +124,56 @@ fn create_actuated_prismatic_joints(
 }
 
 fn create_revolute_joints(
-    bodies: &mut RigidBodySet,
-    colliders: &mut ColliderSet,
-    impulse_joints: &mut ImpulseJointSet,
-    multibody_joints: &mut MultibodyJointSet,
-    origin: Point<f32>,
+    world: &mut PhysicsWorld,
+    origin: Vector,
     num: usize,
     use_articulations: bool,
 ) {
     let rad = 0.4;
     let shift = 2.0;
 
-    let ground = RigidBodyBuilder::fixed().translation(vector![origin.x, origin.y, 0.0]);
-    let mut curr_parent = bodies.insert(ground);
+    let ground = RigidBodyBuilder::fixed().translation(Vector::new(origin.x, origin.y, 0.0));
     let collider = ColliderBuilder::cuboid(rad, rad, rad);
-    colliders.insert_with_parent(collider, curr_parent, bodies);
+    let (mut curr_parent, _) = world.insert(ground, collider);
 
     for i in 0..num {
         // Create four bodies.
         let z = origin.z + i as f32 * shift * 2.0 + shift;
         let positions = [
-            Isometry::translation(origin.x, origin.y, z),
-            Isometry::translation(origin.x + shift, origin.y, z),
-            Isometry::translation(origin.x + shift, origin.y, z + shift),
-            Isometry::translation(origin.x, origin.y, z + shift),
+            Pose::from_translation(Vector::new(origin.x, origin.y, z)),
+            Pose::from_translation(Vector::new(origin.x + shift, origin.y, z)),
+            Pose::from_translation(Vector::new(origin.x + shift, origin.y, z + shift)),
+            Pose::from_translation(Vector::new(origin.x, origin.y, z + shift)),
         ];
 
         let mut handles = [curr_parent; 4];
         for k in 0..4 {
-            let rigid_body = RigidBodyBuilder::dynamic().position(positions[k]);
-            handles[k] = bodies.insert(rigid_body);
+            let rigid_body = RigidBodyBuilder::dynamic().pose(positions[k]);
             let collider = ColliderBuilder::cuboid(rad, rad, rad);
-            colliders.insert_with_parent(collider, handles[k], bodies);
+            let (handle, _) = world.insert(rigid_body, collider);
+            handles[k] = handle;
         }
 
         // Setup four impulse_joints.
-        let x = Vector::x_axis();
-        let z = Vector::z_axis();
+        let x = Vector::X;
+        let z = Vector::Z;
         let revs = [
-            RevoluteJointBuilder::new(z).local_anchor2(point![0.0, 0.0, -shift]),
-            RevoluteJointBuilder::new(x).local_anchor2(point![-shift, 0.0, 0.0]),
-            RevoluteJointBuilder::new(z).local_anchor2(point![0.0, 0.0, -shift]),
-            RevoluteJointBuilder::new(x).local_anchor2(point![shift, 0.0, 0.0]),
+            RevoluteJointBuilder::new(z).local_anchor2(Vector::new(0.0, 0.0, -shift)),
+            RevoluteJointBuilder::new(x).local_anchor2(Vector::new(-shift, 0.0, 0.0)),
+            RevoluteJointBuilder::new(z).local_anchor2(Vector::new(0.0, 0.0, -shift)),
+            RevoluteJointBuilder::new(x).local_anchor2(Vector::new(shift, 0.0, 0.0)),
         ];
 
         if use_articulations {
-            multibody_joints.insert(curr_parent, handles[0], revs[0], true);
-            multibody_joints.insert(handles[0], handles[1], revs[1], true);
-            multibody_joints.insert(handles[1], handles[2], revs[2], true);
-            multibody_joints.insert(handles[2], handles[3], revs[3], true);
+            world.insert_multibody_joint(curr_parent, handles[0], revs[0]);
+            world.insert_multibody_joint(handles[0], handles[1], revs[1]);
+            world.insert_multibody_joint(handles[1], handles[2], revs[2]);
+            world.insert_multibody_joint(handles[2], handles[3], revs[3]);
         } else {
-            impulse_joints.insert(curr_parent, handles[0], revs[0], true);
-            impulse_joints.insert(handles[0], handles[1], revs[1], true);
-            impulse_joints.insert(handles[1], handles[2], revs[2], true);
-            impulse_joints.insert(handles[2], handles[3], revs[3], true);
+            world.insert_impulse_joint(curr_parent, handles[0], revs[0]);
+            world.insert_impulse_joint(handles[0], handles[1], revs[1]);
+            world.insert_impulse_joint(handles[1], handles[2], revs[2]);
+            world.insert_impulse_joint(handles[2], handles[3], revs[3]);
         }
 
         curr_parent = handles[3];
@@ -201,23 +181,25 @@ fn create_revolute_joints(
 }
 
 fn create_revolute_joints_with_limits(
-    bodies: &mut RigidBodySet,
-    colliders: &mut ColliderSet,
-    impulse_joints: &mut ImpulseJointSet,
-    multibody_joints: &mut MultibodyJointSet,
-    origin: Point<f32>,
+    world: &mut PhysicsWorld,
+    origin: Vector,
     use_articulations: bool,
 ) {
-    let ground = bodies.insert(RigidBodyBuilder::fixed().translation(origin.coords));
+    let origin_v = origin;
+    let ground = world.insert_body(RigidBodyBuilder::fixed().translation(origin_v));
 
-    let platform1 = bodies.insert(RigidBodyBuilder::dynamic().translation(origin.coords));
-    colliders.insert_with_parent(ColliderBuilder::cuboid(4.0, 0.2, 2.0), platform1, bodies);
+    let (platform1, _) = world.insert(
+        RigidBodyBuilder::dynamic().translation(origin_v),
+        ColliderBuilder::cuboid(4.0, 0.2, 2.0),
+    );
 
-    let shift = vector![0.0, 0.0, 6.0];
-    let platform2 = bodies.insert(RigidBodyBuilder::dynamic().translation(origin.coords + shift));
-    colliders.insert_with_parent(ColliderBuilder::cuboid(4.0, 0.2, 2.0), platform2, bodies);
+    let shift = Vector::new(0.0, 0.0, 6.0);
+    let (platform2, _) = world.insert(
+        RigidBodyBuilder::dynamic().translation(origin_v + shift),
+        ColliderBuilder::cuboid(4.0, 0.2, 2.0),
+    );
 
-    let z = Vector::z_axis();
+    let z = Vector::Z;
     let joint1 = RevoluteJointBuilder::new(z).limits([-0.2, 0.2]);
     // let joint1 = GenericJointBuilder::new(JointAxesMask::X | JointAxesMask::Y | JointAxesMask::Z)
     //     .local_axis1(z)
@@ -228,13 +210,13 @@ fn create_revolute_joints_with_limits(
     //     .coupled_axes(JointAxesMask::ANG_Y | JointAxesMask::ANG_Z);
 
     if use_articulations {
-        multibody_joints.insert(ground, platform1, joint1, true);
+        world.insert_multibody_joint(ground, platform1, joint1);
     } else {
-        impulse_joints.insert(ground, platform1, joint1, true);
+        world.insert_impulse_joint(ground, platform1, joint1);
     }
 
     let joint2 = RevoluteJointBuilder::new(z)
-        .local_anchor2(-Point::from(shift))
+        .local_anchor2(-shift)
         .limits([-0.2, 0.2]);
 
     // let joint2 = GenericJointBuilder::new(JointAxesMask::X | JointAxesMask::Y | JointAxesMask::Z)
@@ -247,36 +229,26 @@ fn create_revolute_joints_with_limits(
     //     .coupled_axes(JointAxesMask::ANG_Y | JointAxesMask::ANG_Z);
 
     if use_articulations {
-        multibody_joints.insert(platform1, platform2, joint2, true);
+        world.insert_multibody_joint(platform1, platform2, joint2);
     } else {
-        impulse_joints.insert(platform1, platform2, joint2, true);
+        world.insert_impulse_joint(platform1, platform2, joint2);
     }
 
-    // Let’s add a couple of cuboids that will fall on the platforms, triggering the joint limits.
-    let cuboid_body1 = bodies
-        .insert(RigidBodyBuilder::dynamic().translation(origin.coords + vector![-2.0, 4.0, 0.0]));
-    colliders.insert_with_parent(
+    // Let's add a couple of cuboids that will fall on the platforms, triggering the joint limits.
+    let (_cuboid_body1, _) = world.insert(
+        RigidBodyBuilder::dynamic().translation(origin_v + Vector::new(-2.0, 4.0, 0.0)),
         ColliderBuilder::cuboid(0.6, 0.6, 0.6).friction(1.0),
-        cuboid_body1,
-        bodies,
     );
 
-    let cuboid_body2 = bodies.insert(
-        RigidBodyBuilder::dynamic().translation(origin.coords + shift + vector![2.0, 16.0, 0.0]),
-    );
-    colliders.insert_with_parent(
+    let (_cuboid_body2, _) = world.insert(
+        RigidBodyBuilder::dynamic().translation(origin_v + shift + Vector::new(2.0, 16.0, 0.0)),
         ColliderBuilder::cuboid(0.6, 0.6, 0.6).friction(1.0),
-        cuboid_body2,
-        bodies,
     );
 }
 
 fn create_fixed_joints(
-    bodies: &mut RigidBodySet,
-    colliders: &mut ColliderSet,
-    impulse_joints: &mut ImpulseJointSet,
-    multibody_joints: &mut MultibodyJointSet,
-    origin: Point<f32>,
+    world: &mut PhysicsWorld,
+    origin: Vector,
     num: usize,
     use_articulations: bool,
 ) {
@@ -299,25 +271,24 @@ fn create_fixed_joints(
                 RigidBodyType::Dynamic
             };
 
-            let rigid_body = RigidBodyBuilder::new(status).translation(vector![
+            let rigid_body = RigidBodyBuilder::new(status).translation(Vector::new(
                 origin.x + fk * shift,
                 origin.y,
-                origin.z + fi * shift
-            ]);
-            let child_handle = bodies.insert(rigid_body);
+                origin.z + fi * shift,
+            ));
             let collider = ColliderBuilder::ball(rad);
-            colliders.insert_with_parent(collider, child_handle, bodies);
+            let (child_handle, _) = world.insert(rigid_body, collider);
 
             // Vertical joint.
             if i > 0 {
                 let parent_index = body_handles.len() - num;
                 let parent_handle = body_handles[parent_index];
-                let joint = FixedJointBuilder::new().local_anchor2(point![0.0, 0.0, -shift]);
+                let joint = FixedJointBuilder::new().local_anchor2(Vector::new(0.0, 0.0, -shift));
 
                 if use_articulations {
-                    multibody_joints.insert(parent_handle, child_handle, joint, true);
+                    world.insert_multibody_joint(parent_handle, child_handle, joint);
                 } else {
-                    impulse_joints.insert(parent_handle, child_handle, joint, true);
+                    world.insert_impulse_joint(parent_handle, child_handle, joint);
                 }
             }
 
@@ -325,8 +296,8 @@ fn create_fixed_joints(
             if k > 0 {
                 let parent_index = body_handles.len() - 1;
                 let parent_handle = body_handles[parent_index];
-                let joint = FixedJointBuilder::new().local_anchor2(point![-shift, 0.0, 0.0]);
-                impulse_joints.insert(parent_handle, child_handle, joint, true);
+                let joint = FixedJointBuilder::new().local_anchor2(Vector::new(-shift, 0.0, 0.0));
+                world.insert_impulse_joint(parent_handle, child_handle, joint);
             }
 
             body_handles.push(child_handle);
@@ -334,14 +305,7 @@ fn create_fixed_joints(
     }
 }
 
-fn create_spherical_joints(
-    bodies: &mut RigidBodySet,
-    colliders: &mut ColliderSet,
-    impulse_joints: &mut ImpulseJointSet,
-    multibody_joints: &mut MultibodyJointSet,
-    num: usize,
-    use_articulations: bool,
-) {
+fn create_spherical_joints(world: &mut PhysicsWorld, num: usize, use_articulations: bool) {
     let rad = 0.4;
     let shift = 1.0;
 
@@ -358,25 +322,24 @@ fn create_spherical_joints(
                 RigidBodyType::Dynamic
             };
 
-            let rigid_body = RigidBodyBuilder::new(status).translation(vector![
+            let rigid_body = RigidBodyBuilder::new(status).translation(Vector::new(
                 fk * shift,
                 0.0,
-                fi * shift * 2.0
-            ]);
-            let child_handle = bodies.insert(rigid_body);
+                fi * shift * 2.0,
+            ));
             let collider = ColliderBuilder::capsule_z(rad * 1.25, rad);
-            colliders.insert_with_parent(collider, child_handle, bodies);
+            let (child_handle, _) = world.insert(rigid_body, collider);
 
             // Vertical joint.
             if i > 0 {
                 let parent_handle = *body_handles.last().unwrap();
                 let joint =
-                    SphericalJointBuilder::new().local_anchor2(point![0.0, 0.0, -shift * 2.0]);
+                    SphericalJointBuilder::new().local_anchor2(Vector::new(0.0, 0.0, -shift * 2.0));
 
                 if use_articulations {
-                    multibody_joints.insert(parent_handle, child_handle, joint, true);
+                    world.insert_multibody_joint(parent_handle, child_handle, joint);
                 } else {
-                    impulse_joints.insert(parent_handle, child_handle, joint, true);
+                    world.insert_impulse_joint(parent_handle, child_handle, joint);
                 }
             }
 
@@ -384,8 +347,9 @@ fn create_spherical_joints(
             if k > 0 {
                 let parent_index = body_handles.len() - num;
                 let parent_handle = body_handles[parent_index];
-                let joint = SphericalJointBuilder::new().local_anchor2(point![-shift, 0.0, 0.0]);
-                impulse_joints.insert(parent_handle, child_handle, joint, true);
+                let joint =
+                    SphericalJointBuilder::new().local_anchor2(Vector::new(-shift, 0.0, 0.0));
+                world.insert_impulse_joint(parent_handle, child_handle, joint);
             }
 
             body_handles.push(child_handle);
@@ -394,52 +358,49 @@ fn create_spherical_joints(
 }
 
 fn create_spherical_joints_with_limits(
-    bodies: &mut RigidBodySet,
-    colliders: &mut ColliderSet,
-    impulse_joints: &mut ImpulseJointSet,
-    multibody_joints: &mut MultibodyJointSet,
-    origin: Point<f32>,
+    world: &mut PhysicsWorld,
+    origin: Vector,
     use_articulations: bool,
 ) {
-    let shift = vector![0.0, 0.0, 3.0];
+    let shift = Vector::new(0.0, 0.0, 3.0);
+    let origin_v = origin;
 
-    let ground = bodies.insert(RigidBodyBuilder::fixed().translation(origin.coords));
+    let ground = world.insert_body(RigidBodyBuilder::fixed().translation(origin_v));
 
-    let ball1 = bodies.insert(
+    let (ball1, _) = world.insert(
         RigidBodyBuilder::dynamic()
-            .translation(origin.coords + shift)
-            .linvel(vector![20.0, 20.0, 0.0]),
+            .translation(origin_v + shift)
+            .linvel(Vector::new(20.0, 20.0, 0.0)),
+        ColliderBuilder::cuboid(1.0, 1.0, 1.0),
     );
-    colliders.insert_with_parent(ColliderBuilder::cuboid(1.0, 1.0, 1.0), ball1, bodies);
 
-    let ball2 = bodies.insert(RigidBodyBuilder::dynamic().translation(origin.coords + shift * 2.0));
-    colliders.insert_with_parent(ColliderBuilder::cuboid(1.0, 1.0, 1.0), ball2, bodies);
+    let (ball2, _) = world.insert(
+        RigidBodyBuilder::dynamic().translation(origin_v + shift * 2.0),
+        ColliderBuilder::cuboid(1.0, 1.0, 1.0),
+    );
 
     let joint1 = SphericalJointBuilder::new()
-        .local_anchor2(Point::from(-shift))
-        .limits(JointAxis::X, [-0.2, 0.2])
-        .limits(JointAxis::Y, [-0.2, 0.2]);
+        .local_anchor2(-shift)
+        .limits(JointAxis::LinX, [-0.2, 0.2])
+        .limits(JointAxis::LinY, [-0.2, 0.2]);
 
     let joint2 = SphericalJointBuilder::new()
-        .local_anchor2(Point::from(-shift))
-        .limits(JointAxis::X, [-0.3, 0.3])
-        .limits(JointAxis::Y, [-0.3, 0.3]);
+        .local_anchor2(-shift)
+        .limits(JointAxis::LinX, [-0.3, 0.3])
+        .limits(JointAxis::LinY, [-0.3, 0.3]);
 
     if use_articulations {
-        multibody_joints.insert(ground, ball1, joint1, true);
-        multibody_joints.insert(ball1, ball2, joint2, true);
+        world.insert_multibody_joint(ground, ball1, joint1);
+        world.insert_multibody_joint(ball1, ball2, joint2);
     } else {
-        impulse_joints.insert(ground, ball1, joint1, true);
-        impulse_joints.insert(ball1, ball2, joint2, true);
+        world.insert_impulse_joint(ground, ball1, joint1);
+        world.insert_impulse_joint(ball1, ball2, joint2);
     }
 }
 
 fn create_actuated_revolute_joints(
-    bodies: &mut RigidBodySet,
-    colliders: &mut ColliderSet,
-    impulse_joints: &mut ImpulseJointSet,
-    multibody_joints: &mut MultibodyJointSet,
-    origin: Point<f32>,
+    world: &mut PhysicsWorld,
+    origin: Vector,
     num: usize,
     use_articulations: bool,
 ) {
@@ -447,8 +408,8 @@ fn create_actuated_revolute_joints(
     let shift = 2.0;
 
     // We will reuse this base configuration for all the impulse_joints here.
-    let z = Vector::z_axis();
-    let joint_template = RevoluteJointBuilder::new(z).local_anchor2(point![0.0, 0.0, -shift]);
+    let z = Vector::Z;
+    let joint_template = RevoluteJointBuilder::new(z).local_anchor2(Vector::new(0.0, 0.0, -shift));
 
     let mut parent_handle = RigidBodyHandle::invalid();
 
@@ -467,13 +428,12 @@ fn create_actuated_revolute_joints(
         let shifty = (i >= 1) as u32 as f32 * -2.0;
 
         let rigid_body = RigidBodyBuilder::new(status)
-            .translation(vector![origin.x, origin.y + shifty, origin.z + fi * shift])
+            .translation(Vector::new(origin.x, origin.y + shifty, origin.z + fi * shift))
             // .rotation(Vector3::new(0.0, fi * 1.1, 0.0))
             ;
 
-        let child_handle = bodies.insert(rigid_body);
         let collider = ColliderBuilder::cuboid(rad * 2.0, rad * 6.0 / (fi + 1.0), rad);
-        colliders.insert_with_parent(collider, child_handle, bodies);
+        let (child_handle, _) = world.insert(rigid_body, collider);
 
         if i > 0 {
             let mut joint = joint_template.motor_model(MotorModel::AccelerationBased);
@@ -483,19 +443,19 @@ fn create_actuated_revolute_joints(
             } else if i == num - 1 {
                 let stiffness = 200.0;
                 let damping = 100.0;
-                joint = joint.motor_position(3.14 / 2.0, stiffness, damping);
+                joint = joint.motor_position(std::f32::consts::FRAC_PI_2, stiffness, damping);
             }
 
             if i == 1 {
                 joint = joint
-                    .local_anchor2(point![0.0, 2.0, -shift])
+                    .local_anchor2(Vector::new(0.0, 2.0, -shift))
                     .motor_velocity(-2.0, 1000.0);
             }
 
             if use_articulations {
-                multibody_joints.insert(parent_handle, child_handle, joint, true);
+                world.insert_multibody_joint(parent_handle, child_handle, joint);
             } else {
-                impulse_joints.insert(parent_handle, child_handle, joint, true);
+                world.insert_impulse_joint(parent_handle, child_handle, joint);
             }
         }
 
@@ -504,11 +464,8 @@ fn create_actuated_revolute_joints(
 }
 
 fn create_actuated_spherical_joints(
-    bodies: &mut RigidBodySet,
-    colliders: &mut ColliderSet,
-    impulse_joints: &mut ImpulseJointSet,
-    multibody_joints: &mut MultibodyJointSet,
-    origin: Point<f32>,
+    world: &mut PhysicsWorld,
+    origin: Vector,
     num: usize,
     use_articulations: bool,
 ) {
@@ -516,7 +473,7 @@ fn create_actuated_spherical_joints(
     let shift = 2.0;
 
     // We will reuse this base configuration for all the impulse_joints here.
-    let joint_template = SphericalJointBuilder::new().local_anchor1(point![0.0, 0.0, shift]);
+    let joint_template = SphericalJointBuilder::new().local_anchor1(Vector::new(0.0, 0.0, shift));
 
     let mut parent_handle = RigidBodyHandle::invalid();
 
@@ -533,16 +490,15 @@ fn create_actuated_spherical_joints(
         };
 
         let rigid_body = RigidBodyBuilder::new(status)
-            .translation(vector![origin.x, origin.y, origin.z + fi * shift])
+            .translation(Vector::new(origin.x, origin.y, origin.z + fi * shift))
             // .rotation(Vector3::new(0.0, fi * 1.1, 0.0))
             ;
 
-        let child_handle = bodies.insert(rigid_body);
         let collider = ColliderBuilder::capsule_y(rad * 2.0 / (fi + 1.0), rad);
-        colliders.insert_with_parent(collider, child_handle, bodies);
+        let (child_handle, _) = world.insert(rigid_body, collider);
 
         if i > 0 {
-            let mut joint = joint_template.clone();
+            let mut joint = joint_template;
 
             if i == 1 {
                 joint = joint
@@ -555,13 +511,18 @@ fn create_actuated_spherical_joints(
                 joint = joint
                     .motor_position(JointAxis::AngX, 0.0, stiffness, damping)
                     .motor_position(JointAxis::AngY, 1.0, stiffness, damping)
-                    .motor_position(JointAxis::AngZ, 3.14 / 2.0, stiffness, damping);
+                    .motor_position(
+                        JointAxis::AngZ,
+                        std::f32::consts::FRAC_PI_2,
+                        stiffness,
+                        damping,
+                    );
             }
 
             if use_articulations {
-                multibody_joints.insert(parent_handle, child_handle, joint, true);
+                world.insert_multibody_joint(parent_handle, child_handle, joint);
             } else {
-                impulse_joints.insert(parent_handle, child_handle, joint, true);
+                world.insert_impulse_joint(parent_handle, child_handle, joint);
             }
         }
 
@@ -569,113 +530,59 @@ fn create_actuated_spherical_joints(
     }
 }
 
-fn do_init_world(testbed: &mut Testbed, use_articulations: bool) {
+fn build_scene(world: &mut PhysicsWorld, use_articulations: bool) {
+    create_prismatic_joints(world, Vector::new(20.0, 5.0, 0.0), 4, use_articulations);
+    create_actuated_prismatic_joints(world, Vector::new(25.0, 5.0, 0.0), 4, use_articulations);
+    create_revolute_joints(world, Vector::new(20.0, 0.0, 0.0), 3, use_articulations);
+    create_revolute_joints_with_limits(world, Vector::new(34.0, 0.0, 0.0), use_articulations);
+    create_fixed_joints(world, Vector::new(0.0, 10.0, 0.0), 10, use_articulations);
+    create_actuated_revolute_joints(world, Vector::new(20.0, 10.0, 0.0), 6, use_articulations);
+    create_actuated_spherical_joints(world, Vector::new(13.0, 10.0, 0.0), 3, use_articulations);
+    create_spherical_joints(world, 15, use_articulations);
+    create_spherical_joints_with_limits(world, Vector::new(-5.0, 0.0, 0.0), use_articulations);
+    create_coupled_joints(world, Vector::new(0.0, 20.0, 0.0), use_articulations);
+}
+
+pub async fn run_impulse_joints(viewer: &mut TestbedViewer) -> anyhow::Result<()> {
     /*
      * World
      */
-    let mut bodies = RigidBodySet::new();
-    let mut colliders = ColliderSet::new();
-    let mut impulse_joints = ImpulseJointSet::new();
-    let mut multibody_joints = MultibodyJointSet::new();
+    let mut world = PhysicsWorld::new();
 
-    create_prismatic_joints(
-        &mut bodies,
-        &mut colliders,
-        &mut impulse_joints,
-        &mut multibody_joints,
-        point![20.0, 5.0, 0.0],
-        4,
-        use_articulations,
-    );
-    create_actuated_prismatic_joints(
-        &mut bodies,
-        &mut colliders,
-        &mut impulse_joints,
-        &mut multibody_joints,
-        point![25.0, 5.0, 0.0],
-        4,
-        use_articulations,
-    );
-    create_revolute_joints(
-        &mut bodies,
-        &mut colliders,
-        &mut impulse_joints,
-        &mut multibody_joints,
-        point![20.0, 0.0, 0.0],
-        3,
-        use_articulations,
-    );
-    create_revolute_joints_with_limits(
-        &mut bodies,
-        &mut colliders,
-        &mut impulse_joints,
-        &mut multibody_joints,
-        point![34.0, 0.0, 0.0],
-        use_articulations,
-    );
-    create_fixed_joints(
-        &mut bodies,
-        &mut colliders,
-        &mut impulse_joints,
-        &mut multibody_joints,
-        point![0.0, 10.0, 0.0],
-        10,
-        use_articulations,
-    );
-    create_actuated_revolute_joints(
-        &mut bodies,
-        &mut colliders,
-        &mut impulse_joints,
-        &mut multibody_joints,
-        point![20.0, 10.0, 0.0],
-        6,
-        use_articulations,
-    );
-    create_actuated_spherical_joints(
-        &mut bodies,
-        &mut colliders,
-        &mut impulse_joints,
-        &mut multibody_joints,
-        point![13.0, 10.0, 0.0],
-        3,
-        use_articulations,
-    );
-    create_spherical_joints(
-        &mut bodies,
-        &mut colliders,
-        &mut impulse_joints,
-        &mut multibody_joints,
-        15,
-        use_articulations,
-    );
-    create_spherical_joints_with_limits(
-        &mut bodies,
-        &mut colliders,
-        &mut impulse_joints,
-        &mut multibody_joints,
-        point![-5.0, 0.0, 0.0],
-        use_articulations,
-    );
-    create_coupled_joints(
-        &mut bodies,
-        &mut colliders,
-        &mut impulse_joints,
-        &mut multibody_joints,
-        point![0.0, 20.0, 0.0],
-        use_articulations,
-    );
+    build_scene(&mut world, false);
 
     /*
      * Set up the testbed.
      */
-    testbed.set_world(bodies, colliders, impulse_joints, multibody_joints);
-    testbed.look_at(point![15.0, 5.0, 42.0], point![13.0, 1.0, 1.0]);
+    viewer.set_world(&mut world);
+    viewer.look_at(Vec3::new(15.0, 5.0, 42.0), Vec3::new(13.0, 1.0, 1.0));
+
+    while viewer.render_frame(&mut world).await {
+        if viewer.simulating() {
+            world.step();
+        }
+    }
+    Ok(())
 }
 
-pub fn init_world_with_joints(testbed: &mut Testbed) {
-    do_init_world(testbed, false)
-}
+pub async fn run_multibody_joints(viewer: &mut TestbedViewer) -> anyhow::Result<()> {
+    /*
+     * World
+     */
+    let mut world = PhysicsWorld::new();
 
-pub fn init_world_with_articulations(testbed: &mut Testbed) {
-    do_init_world(testbed, true)
+    build_scene(&mut world, true);
+
+    /*
+     * Set up the testbed.
+     */
+    viewer.set_world(&mut world);
+    viewer.look_at(Vec3::new(15.0, 5.0, 42.0), Vec3::new(13.0, 1.0, 1.0));
+
+    while viewer.render_frame(&mut world).await {
+        if viewer.simulating() {
+            world.step();
+        }
+    }
+    Ok(())
 }

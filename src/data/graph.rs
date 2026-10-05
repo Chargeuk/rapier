@@ -1,11 +1,12 @@
 // This is basically a stripped down version of petgraph's UnGraph.
-// - It is not generic wrt. the index type (we always use u32).
+// - It is not generic with respect to the index type (we always use u32).
 // - It preserves associated edge iteration order after Serialization/Deserialization.
 // - It is always undirected.
 //! A stripped-down version of petgraph's UnGraph.
+use crate::alloc_prelude::*;
 
-use std::cmp::max;
-use std::ops::{Index, IndexMut};
+use core::cmp::max;
+use core::ops::{Index, IndexMut};
 
 /// Node identifier.
 #[derive(Copy, Clone, Default, PartialEq, PartialOrd, Eq, Ord, Hash, Debug)]
@@ -109,6 +110,11 @@ pub struct Edge<E> {
     pub weight: E,
     /// Next edge in outgoing and incoming edge lists.
     next: [EdgeIndex; 2],
+    /// Previous edge in outgoing and incoming edge lists (`EdgeIndex::end()`
+    /// when this edge is the list head stored on the node). Kept so unlinking
+    /// an edge — the broad-phase's bread and butter on churn-heavy scenes — is
+    /// O(1) instead of an O(degree) list walk per endpoint.
+    prev: [EdgeIndex; 2],
     /// Start and End node index
     node: [NodeIndex; 2],
 }
@@ -145,12 +151,11 @@ fn index_twice<T>(arr: &mut [T], a: usize, b: usize) -> Pair<&mut T> {
     } else if a == b {
         Pair::One(&mut arr[max(a, b)])
     } else {
-        // safe because a, b are in bounds and distinct
-        unsafe {
-            let ar = &mut *(arr.get_unchecked_mut(a) as *mut _);
-            let br = &mut *(arr.get_unchecked_mut(b) as *mut _);
-            Pair::Both(ar, br)
-        }
+        // Never fails: a, b are in bounds and distinct.
+        let [ar, br] = arr
+            .get_disjoint_mut([a, b])
+            .expect("indices are in bounds and distinct");
+        Pair::Both(ar, br)
     }
 }
 
@@ -223,6 +228,7 @@ impl<N, E> Graph<N, E> {
             weight,
             node: [a, b],
             next: [EdgeIndex::end(); 2],
+            prev: [EdgeIndex::end(); 2],
         };
         match index_twice(&mut self.nodes, a.index(), b.index()) {
             Pair::None => panic!("Graph::add_edge: node indices out of bounds"),
@@ -236,6 +242,13 @@ impl<N, E> Graph<N, E> {
                 edge.next = [an.next[0], bn.next[1]];
                 an.next[0] = edge_idx;
                 bn.next[1] = edge_idx;
+            }
+        }
+        // Back-links of the displaced list heads (doubly-linked adjacency).
+        for k in 0..2 {
+            let nxt = edge.next[k];
+            if nxt != EdgeIndex::end() {
+                self.edges[nxt.index()].prev[k] = edge_idx;
             }
         }
         self.edges.push(edge);
@@ -262,6 +275,17 @@ impl<N, E> Graph<N, E> {
     /// of edges with an endpoint in `a`, and including the edges with an
     /// endpoint in the displaced node.
     pub fn remove_node(&mut self, a: NodeIndex) -> Option<N> {
+        self.remove_node_with(a, &mut |_| {})
+    }
+
+    /// Same as [`Self::remove_node`], invoking `on_remove` with each removed edge
+    /// index right before its removal is applied, so side arrays indexed like
+    /// `self.edges` can mirror the `swap_remove`s.
+    pub fn remove_node_with(
+        &mut self,
+        a: NodeIndex,
+        on_remove: &mut dyn FnMut(EdgeIndex),
+    ) -> Option<N> {
         self.nodes.get(a.index())?;
         for d in &DIRECTIONS {
             let k = *d as usize;
@@ -272,7 +296,7 @@ impl<N, E> Graph<N, E> {
                 if next == EdgeIndex::end() {
                     break;
                 }
-                let ret = self.remove_edge(next);
+                let ret = self.remove_edge_with(next, on_remove);
                 debug_assert!(ret.is_some());
                 let _ = ret;
             }
@@ -306,39 +330,63 @@ impl<N, E> Graph<N, E> {
         Some(node.weight)
     }
 
-    /// For edge `e` with endpoints `edge_node`, replace links to it,
-    /// with links to `edge_next`.
-    fn change_edge_links(
-        &mut self,
-        edge_node: [NodeIndex; 2],
-        e: EdgeIndex,
-        edge_next: [EdgeIndex; 2],
-    ) {
+    /// Unlinks edge `e` from the adjacency lists of both its endpoints, in O(1)
+    /// through the doubly-linked `prev`/`next` edge links. `e`'s own links are
+    /// left untouched (it is about to be removed or rewritten by the caller).
+    fn unlink_edge(&mut self, e: EdgeIndex) {
+        let (edge_node, edge_next, edge_prev) = {
+            let ed = &self.edges[e.index()];
+            (ed.node, ed.next, ed.prev)
+        };
         for &d in &DIRECTIONS {
             let k = d as usize;
-            let node = match self.nodes.get_mut(edge_node[k].index()) {
-                Some(r) => r,
-                None => {
+            let prev = edge_prev[k];
+            let next = edge_next[k];
+            if prev == EdgeIndex::end() {
+                // `e` is the list head stored on the node.
+                if let Some(node) = self.nodes.get_mut(edge_node[k].index()) {
+                    debug_assert!(node.next[k] == e);
+                    node.next[k] = next;
+                } else {
                     debug_assert!(
                         false,
                         "Edge's endpoint dir={:?} index={:?} not found",
                         d, edge_node[k]
                     );
-                    return;
                 }
-            };
-            let fst = node.next[k];
-            if fst == e {
-                //println!("Updating first edge 0 for node {}, set to {}", edge_node[0], edge_next[0]);
-                node.next[k] = edge_next[k];
             } else {
-                let mut edges = edges_walker_mut(&mut self.edges, fst, d);
-                while let Some(curedge) = edges.next_edge() {
-                    if curedge.next[k] == e {
-                        curedge.next[k] = edge_next[k];
-                        break; // the edge can only be present once in the list.
-                    }
+                debug_assert!(self.edges[prev.index()].next[k] == e);
+                self.edges[prev.index()].next[k] = next;
+            }
+            if next != EdgeIndex::end() {
+                debug_assert!(self.edges[next.index()].prev[k] == e);
+                self.edges[next.index()].prev[k] = prev;
+            }
+        }
+    }
+
+    /// Rewrites the neighbors' (and head's) links pointing at edge `e` — whose
+    /// links are valid but whose index just changed — to `new_e`, in O(1)
+    /// through the doubly-linked edge links. The caller must already have moved
+    /// the edge's data to `new_e`'s slot.
+    fn relink_edge(&mut self, new_e: EdgeIndex) {
+        let (edge_node, edge_next, edge_prev) = {
+            let ed = &self.edges[new_e.index()];
+            (ed.node, ed.next, ed.prev)
+        };
+        for &d in &DIRECTIONS {
+            let k = d as usize;
+            let prev = edge_prev[k];
+            let next = edge_next[k];
+            if prev == EdgeIndex::end() {
+                if let Some(node) = self.nodes.get_mut(edge_node[k].index()) {
+                    node.next[k] = new_e;
                 }
+            } else {
+                self.edges[prev.index()].next[k] = new_e;
+            }
+            if next != EdgeIndex::end() {
+                self.edges[next.index()].prev[k] = new_e;
             }
         }
     }
@@ -351,16 +399,23 @@ impl<N, E> Graph<N, E> {
     /// Computes in **O(e')** time, where **e'** is the size of four particular edge lists, for
     /// the vertices of `e` and the vertices of another affected edge.
     pub fn remove_edge(&mut self, e: EdgeIndex) -> Option<E> {
+        self.remove_edge_with(e, &mut |_| {})
+    }
+
+    /// Same as [`Self::remove_edge`], invoking `on_remove` with the edge index right
+    /// before the removal is applied, so side arrays indexed like `self.edges` can
+    /// mirror the `swap_remove`.
+    pub fn remove_edge_with(
+        &mut self,
+        e: EdgeIndex,
+        on_remove: &mut dyn FnMut(EdgeIndex),
+    ) -> Option<E> {
         // every edge is part of two lists,
         // outgoing and incoming edges.
         // Remove it from both
-        let (edge_node, edge_next) = match self.edges.get(e.index()) {
-            None => return None,
-            Some(x) => (x.node, x.next),
-        };
-        // Remove the edge from its in and out lists by replacing it with
-        // a link to the next in the list.
-        self.change_edge_links(edge_node, e, edge_next);
+        self.edges.get(e.index())?;
+        self.unlink_edge(e);
+        on_remove(e);
         self.remove_edge_adjust_indices(e)
     }
 
@@ -369,16 +424,11 @@ impl<N, E> Graph<N, E> {
         // and the edge swapped into place are affected and need updating
         // indices.
         let edge = self.edges.swap_remove(e.index());
-        let swap = match self.edges.get(e.index()) {
-            // no elment needed to be swapped.
-            None => return Some(edge.weight),
-            Some(ed) => ed.node,
-        };
-        let swapped_e = EdgeIndex::new(self.edges.len() as u32);
-
-        // Update the edge lists by replacing links to the old index by references to the new
-        // edge index.
-        self.change_edge_links(swap, swapped_e, [e, e]);
+        if e.index() < self.edges.len() {
+            // An edge was swapped into the removed slot: rewrite the links
+            // pointing at its old index (the last slot) to `e`.
+            self.relink_edge(e);
+        }
         Some(edge.weight)
     }
 
@@ -389,7 +439,7 @@ impl<N, E> Graph<N, E> {
     ///
     /// Produces an empty iterator if the node doesn't exist.<br>
     /// Iterator element type is `EdgeReference<E, Ix>`.
-    pub fn edges(&self, a: NodeIndex) -> Edges<E> {
+    pub fn edges(&self, a: NodeIndex) -> Edges<'_, E> {
         self.edges_directed(a, Direction::Outgoing)
     }
 
@@ -404,7 +454,7 @@ impl<N, E> Graph<N, E> {
     ///
     /// Produces an empty iterator if the node `a` doesn't exist.<br>
     /// Iterator element type is `EdgeReference<E, Ix>`.
-    pub fn edges_directed(&self, a: NodeIndex, dir: Direction) -> Edges<E> {
+    pub fn edges_directed(&self, a: NodeIndex, dir: Direction) -> Edges<'_, E> {
         Edges {
             skip_start: a,
             edges: &self.edges,
@@ -438,6 +488,21 @@ impl<N, E> Graph<N, E> {
     /// connected to `a` (and `b`, if the graph edges are undirected).
     pub fn find_edge(&self, a: NodeIndex, b: NodeIndex) -> Option<EdgeIndex> {
         self.find_edge_undirected(a, b).map(|(ix, _)| ix)
+    }
+
+    /// Return an iterator over all the edges connecting `a` and `b`, in either direction.
+    ///
+    /// Unlike [`Self::find_edge`], this yields every parallel edge between the two
+    /// nodes instead of only the first one found.
+    pub fn edges_between(
+        &self,
+        a: NodeIndex,
+        b: NodeIndex,
+    ) -> impl Iterator<Item = EdgeIndex> + '_ {
+        self.edges(a).filter_map(move |e| {
+            let node = self.edges[e.id().index()].node;
+            (node == [a, b] || node == [b, a]).then_some(e.id())
+        })
     }
 
     /// Lookup an edge between `a` and `b`, in either direction.
@@ -517,74 +582,6 @@ impl<N, E> Graph<N, E> {
     }
 }
 
-/// An iterator over either the nodes without edges to them or from them.
-pub struct Externals<'a, N: 'a> {
-    iter: std::iter::Enumerate<std::slice::Iter<'a, Node<N>>>,
-    dir: Direction,
-}
-
-impl<'a, N: 'a> Iterator for Externals<'a, N> {
-    type Item = NodeIndex;
-    fn next(&mut self) -> Option<NodeIndex> {
-        let k = self.dir as usize;
-        loop {
-            match self.iter.next() {
-                None => return None,
-                Some((index, node)) => {
-                    if node.next[k] == EdgeIndex::end() && node.next[1 - k] == EdgeIndex::end() {
-                        return Some(NodeIndex::new(index as u32));
-                    } else {
-                        continue;
-                    }
-                }
-            }
-        }
-    }
-}
-
-/// Iterator over the neighbors of a node.
-///
-/// Iterator element type is `NodeIndex`.
-///
-/// Created with [`.neighbors()`][1], [`.neighbors_directed()`][2] or
-/// [`.neighbors_undirected()`][3].
-///
-/// [1]: struct.Graph.html#method.neighbors
-/// [2]: struct.Graph.html#method.neighbors_directed
-/// [3]: struct.Graph.html#method.neighbors_undirected
-pub struct Neighbors<'a, E: 'a> {
-    /// starting node to skip over
-    skip_start: NodeIndex,
-    edges: &'a [Edge<E>],
-    next: [EdgeIndex; 2],
-}
-
-impl<'a, E> Iterator for Neighbors<'a, E> {
-    type Item = NodeIndex;
-
-    fn next(&mut self) -> Option<NodeIndex> {
-        // First any outgoing edges
-        match self.edges.get(self.next[0].index()) {
-            None => {}
-            Some(edge) => {
-                self.next[0] = edge.next[0];
-                return Some(edge.node[1]);
-            }
-        }
-        // Then incoming edges
-        // For an "undirected" iterator (traverse both incoming
-        // and outgoing edge lists), make sure we don't double
-        // count selfloops by skipping them in the incoming list.
-        while let Some(edge) = self.edges.get(self.next[1].index()) {
-            self.next[1] = edge.next[1];
-            if edge.node[0] != self.skip_start {
-                return Some(edge.node[0]);
-            }
-        }
-        None
-    }
-}
-
 struct EdgesWalkerMut<'a, E: 'a> {
     edges: &'a mut [Edge<E>],
     next: EdgeIndex,
@@ -595,11 +592,11 @@ fn edges_walker_mut<E>(
     edges: &mut [Edge<E>],
     next: EdgeIndex,
     dir: Direction,
-) -> EdgesWalkerMut<E> {
+) -> EdgesWalkerMut<'_, E> {
     EdgesWalkerMut { edges, next, dir }
 }
 
-impl<'a, E> EdgesWalkerMut<'a, E> {
+impl<E> EdgesWalkerMut<'_, E> {
     fn next_edge(&mut self) -> Option<&mut Edge<E>> {
         self.next().map(|t| t.1)
     }
@@ -652,6 +649,7 @@ impl<'a, E> Iterator for Edges<'a, E> {
                 node: _node,
                 weight,
                 next,
+                ..
             }) = self.edges.get(i)
             {
                 self.next[0] = next[0];
@@ -668,7 +666,10 @@ impl<'a, E> Iterator for Edges<'a, E> {
         }
 
         if iterate_over.unwrap_or(Direction::Incoming) == Direction::Incoming {
-            while let Some(Edge { node, weight, next }) = self.edges.get(self.next[1].index()) {
+            while let Some(Edge {
+                node, weight, next, ..
+            }) = self.edges.get(self.next[1].index())
+            {
                 let edge_index = self.next[1];
                 self.next[1] = next[1];
                 // In any of the "both" situations, self-loops would be iterated over twice.
@@ -698,7 +699,7 @@ impl<'a, E> Iterator for Edges<'a, E> {
 //     x
 // }
 
-impl<'a, E> Clone for Edges<'a, E> {
+impl<E> Clone for Edges<'_, E> {
     fn clone(&self) -> Self {
         Edges {
             skip_start: self.skip_start,
@@ -767,15 +768,15 @@ impl<'a, E: 'a> EdgeReference<'a, E> {
     }
 }
 
-impl<'a, E> Clone for EdgeReference<'a, E> {
+impl<E> Clone for EdgeReference<'_, E> {
     fn clone(&self) -> Self {
         *self
     }
 }
 
-impl<'a, E> Copy for EdgeReference<'a, E> {}
+impl<E> Copy for EdgeReference<'_, E> {}
 
-impl<'a, E> PartialEq for EdgeReference<'a, E>
+impl<E> PartialEq for EdgeReference<'_, E>
 where
     E: PartialEq,
 {
@@ -783,32 +784,3 @@ where
         self.index == rhs.index && self.weight == rhs.weight
     }
 }
-
-/// Iterator over all nodes of a graph.
-pub struct NodeReferences<'a, N: 'a> {
-    iter: std::iter::Enumerate<std::slice::Iter<'a, Node<N>>>,
-}
-
-impl<'a, N> Iterator for NodeReferences<'a, N> {
-    type Item = (NodeIndex, &'a N);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        self.iter
-            .next()
-            .map(|(i, node)| (NodeIndex::new(i as u32), &node.weight))
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        self.iter.size_hint()
-    }
-}
-
-impl<'a, N> DoubleEndedIterator for NodeReferences<'a, N> {
-    fn next_back(&mut self) -> Option<Self::Item> {
-        self.iter
-            .next_back()
-            .map(|(i, node)| (NodeIndex::new(i as u32), &node.weight))
-    }
-}
-
-impl<'a, N> ExactSizeIterator for NodeReferences<'a, N> {}

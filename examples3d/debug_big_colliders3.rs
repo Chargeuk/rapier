@@ -1,23 +1,19 @@
+use rapier_testbed3d::TestbedViewer;
 use rapier3d::prelude::*;
-use rapier_testbed3d::Testbed;
 
-pub fn init_world(testbed: &mut Testbed) {
+pub async fn run(viewer: &mut TestbedViewer) -> anyhow::Result<()> {
     /*
      * World
      */
-    let mut bodies = RigidBodySet::new();
-    let mut colliders = ColliderSet::new();
-    let impulse_joints = ImpulseJointSet::new();
-    let multibody_joints = MultibodyJointSet::new();
+    let mut world = PhysicsWorld::new();
 
     /*
      * Ground
      */
     let rigid_body = RigidBodyBuilder::fixed();
-    let handle = bodies.insert(rigid_body);
-    let halfspace = SharedShape::new(HalfSpace::new(Vector::y_axis()));
+    let halfspace = SharedShape::new(HalfSpace::new(Vector::Y));
     let collider = ColliderBuilder::new(halfspace);
-    colliders.insert_with_parent(collider, handle, &mut bodies);
+    let (_handle, _) = world.insert(rigid_body, collider);
 
     let mut curr_y = 0.0;
     let mut curr_width = 10_000.0;
@@ -26,10 +22,9 @@ pub fn init_world(testbed: &mut Testbed) {
         let curr_height = 0.1f32.min(curr_width);
         curr_y += curr_height * 4.0;
 
-        let rigid_body = RigidBodyBuilder::dynamic().translation(vector![0.0, curr_y, 0.0]);
-        let handle = bodies.insert(rigid_body);
+        let rigid_body = RigidBodyBuilder::dynamic().translation(Vector::new(0.0, curr_y, 0.0));
         let collider = ColliderBuilder::cuboid(curr_width, curr_height, curr_width);
-        colliders.insert_with_parent(collider, handle, &mut bodies);
+        let (_handle, _) = world.insert(rigid_body, collider);
 
         curr_width /= 5.0;
     }
@@ -37,6 +32,13 @@ pub fn init_world(testbed: &mut Testbed) {
     /*
      * Set up the testbed.
      */
-    testbed.set_world(bodies, colliders, impulse_joints, multibody_joints);
-    testbed.look_at(point![10.0, 10.0, 10.0], Point::origin());
+    viewer.set_world(&mut world);
+    viewer.look_at(Vec3::new(10.0, 10.0, 10.0), Vec3::ZERO);
+
+    while viewer.render_frame(&mut world).await {
+        if viewer.simulating() {
+            world.step();
+        }
+    }
+    Ok(())
 }

@@ -1,0 +1,84 @@
+use rapier_testbed2d::TestbedViewer;
+use rapier2d::prelude::*;
+
+pub async fn run(viewer: &mut TestbedViewer) -> anyhow::Result<()> {
+    /*
+     * World
+     */
+    let mut world = PhysicsWorld::new();
+
+    let radius = 0.5;
+    let grid_count = 25;
+    let friction = 0.6;
+    let max_count = grid_count * grid_count;
+
+    /*
+     * Ground
+     */
+    let collider = ColliderBuilder::capsule_from_endpoints(
+        Vector::new(-10.5, 0.0),
+        Vector::new(10.5, 0.0),
+        radius,
+    )
+    .friction(friction);
+    world.insert_collider(collider, None);
+    let collider = ColliderBuilder::capsule_from_endpoints(
+        Vector::new(-10.5, 0.0),
+        Vector::new(-10.5, 20.5),
+        radius,
+    )
+    .friction(friction);
+    world.insert_collider(collider, None);
+    let collider = ColliderBuilder::capsule_from_endpoints(
+        Vector::new(10.5, 0.0),
+        Vector::new(10.5, 20.5),
+        radius,
+    )
+    .friction(friction);
+    world.insert_collider(collider, None);
+    let collider = ColliderBuilder::capsule_from_endpoints(
+        Vector::new(-10.5, 20.5),
+        Vector::new(10.5, 20.5),
+        radius,
+    )
+    .friction(friction);
+    world.insert_collider(collider, None);
+
+    /*
+     * Create the spheres
+     */
+    let mut row;
+    let mut count = 0;
+    let mut column = 0;
+
+    while count < max_count {
+        row = 0;
+        for _ in 0..grid_count {
+            let x = -8.75 + column as f32 * 18.0 / (grid_count as f32);
+            let y = 1.5 + row as f32 * 18.0 / (grid_count as f32);
+            let body = RigidBodyBuilder::dynamic()
+                .translation(Vector::new(x, y))
+                .gravity_scale(0.0);
+            let ball = ColliderBuilder::ball(radius).friction(friction);
+            let _ = world.insert(body, ball);
+
+            count += 1;
+            row += 1;
+        }
+
+        column += 1;
+    }
+
+    /*
+     * Set up the testbed.
+     */
+    viewer.set_world(&mut world);
+    viewer.look_at(Vec2::new(0.0, 2.5), 20.0);
+
+    while viewer.render_frame(&mut world).await {
+        if viewer.simulating() {
+            world.step();
+        }
+    }
+    Ok(())
+}

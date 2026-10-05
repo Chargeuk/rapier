@@ -1,14 +1,12 @@
+use rapier_testbed3d::TestbedViewer;
 use rapier3d::prelude::*;
-use rapier_testbed3d::Testbed;
 
-pub fn init_world(testbed: &mut Testbed) {
+pub async fn run(viewer: &mut TestbedViewer) -> anyhow::Result<()> {
     /*
      * World
      */
-    let mut bodies = RigidBodySet::new();
-    let mut colliders = ColliderSet::new();
-    let impulse_joints = ImpulseJointSet::new();
-    let multibody_joints = MultibodyJointSet::new();
+    let mut world = PhysicsWorld::new();
+    world.gravity = Vector::ZERO;
 
     /*
      * Create the cubes
@@ -23,28 +21,26 @@ pub fn init_world(testbed: &mut Testbed) {
 
         // Build the rigid body.
         let rb = RigidBodyBuilder::dynamic()
-            .translation(vector![x, y, 0.0])
-            .linvel(vector![x * 10.0, y * 10.0, 0.0])
-            .angvel(Vector::z() * 100.0)
+            .translation(Vector::new(x, y, 0.0))
+            .linvel(Vector::new(x * 10.0, y * 10.0, 0.0))
+            .angvel(Vector::Z * 100.0)
             .linear_damping((i + 1) as f32 * subdiv * 10.0)
             .angular_damping((num - i) as f32 * subdiv * 10.0);
-        let rb_handle = bodies.insert(rb);
-
         // Build the collider.
         let co = ColliderBuilder::cuboid(rad, rad, rad);
-        colliders.insert_with_parent(co, rb_handle, &mut bodies);
+        let (_rb_handle, _) = world.insert(rb, co);
     }
 
     /*
      * Set up the testbed.
      */
-    testbed.set_world_with_params(
-        bodies,
-        colliders,
-        impulse_joints,
-        multibody_joints,
-        Vector::zeros(),
-        (),
-    );
-    testbed.look_at(point![2.0, 2.5, 20.0], point![2.0, 2.5, 0.0]);
+    viewer.set_world(&mut world);
+    viewer.look_at(Vec3::new(2.0, 2.5, 20.0), Vec3::new(2.0, 2.5, 0.0));
+
+    while viewer.render_frame(&mut world).await {
+        if viewer.simulating() {
+            world.step();
+        }
+    }
+    Ok(())
 }

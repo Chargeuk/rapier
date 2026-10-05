@@ -1,20 +1,23 @@
+use rapier_testbed3d::TestbedViewer;
 use rapier3d::prelude::*;
-use rapier_testbed3d::Testbed;
 
-pub fn init_world(testbed: &mut Testbed) {
+pub async fn run(viewer: &mut TestbedViewer) -> anyhow::Result<()> {
     /*
      * World
      */
-    let mut bodies = RigidBodySet::new();
-    let mut colliders = ColliderSet::new();
-    let impulse_joints = ImpulseJointSet::new();
-    let multibody_joints = MultibodyJointSet::new();
+    let mut world = PhysicsWorld::new();
 
-    let heights = DMatrix::zeros(100, 100);
-    let heightfield = HeightField::new(heights, vector![60.0, 1.0, 60.0]);
-    let rotation = vector![0.0, 0.0, 0.0]; // vector![-0.1, 0.0, 0.0];
-    colliders
-        .insert(ColliderBuilder::new(SharedShape::new(heightfield.clone())).rotation(rotation));
+    let heights = Array2::zeros(100, 100);
+    let heightfield = HeightField::with_flags(
+        heights,
+        Vector::new(60.0, 1.0, 60.0),
+        HeightFieldFlags::all(),
+    );
+    let rotation = Vector::new(0.0, 0.0, 0.0); // Vector::new(-0.1, 0.0, 0.0);
+    world.insert_collider(
+        ColliderBuilder::new(SharedShape::new(heightfield.clone())).rotation(rotation),
+        None,
+    );
 
     // let mut trimesh = TriMesh::from(heightfield);
     // trimesh.set_flags(TriMeshFlags::MERGE_DUPLICATE_VERTICES)
@@ -28,33 +31,40 @@ pub fn init_world(testbed: &mut Testbed) {
 
     // Dynamic rigid bodies.
     let rigid_body = RigidBodyBuilder::dynamic()
-        .translation(vector![4.0, 0.5, 0.0])
-        .linvel(vector![0.0, -40.0, 20.0])
+        .translation(Vector::new(4.0, 0.5, 0.0))
+        .linvel(Vector::new(0.0, -40.0, 20.0))
         .can_sleep(false);
-    let handle = bodies.insert(rigid_body);
     let collider = ColliderBuilder::ball(0.5);
-    colliders.insert_with_parent(collider, handle, &mut bodies);
+    let (_handle, _) = world.insert(rigid_body, collider);
 
     let rigid_body = RigidBodyBuilder::dynamic()
-        .translation(vector![0.0, 0.5, 0.0])
-        .linvel(vector![0.0, -4.0, 20.0])
+        .translation(Vector::new(-3.0, 5.0, 0.0))
+        .linvel(Vector::new(0.0, -4.0, 20.0))
         .can_sleep(false);
-    let handle = bodies.insert(rigid_body);
     let collider = ColliderBuilder::cuboid(0.5, 0.5, 0.5);
-    colliders.insert_with_parent(collider, handle, &mut bodies);
+    let (_handle, _) = world.insert(rigid_body, collider);
 
     let rigid_body = RigidBodyBuilder::dynamic()
-        .translation(vector![8.0, 0.2, 0.0])
-        .linvel(vector![0.0, -4.0, 20.0])
+        .translation(Vector::new(8.0, 0.2, 0.0))
+        .linvel(Vector::new(0.0, -4.0, 20.0))
         .can_sleep(false);
-    let handle = bodies.insert(rigid_body);
-    let collider =
-        ColliderBuilder::cylinder(0.5, 0.2).rotation(vector![0.0, 0.0, std::f32::consts::PI / 2.0]);
-    colliders.insert_with_parent(collider, handle, &mut bodies);
+    let collider = ColliderBuilder::cylinder(0.5, 0.2).rotation(Vector::new(
+        0.0,
+        0.0,
+        std::f32::consts::PI / 2.0,
+    ));
+    let (_handle, _) = world.insert(rigid_body, collider);
 
     /*
      * Set up the testbed.
      */
-    testbed.set_world(bodies, colliders, impulse_joints, multibody_joints);
-    testbed.look_at(point![10.0, 10.0, 10.0], Point::origin());
+    viewer.set_world(&mut world);
+    viewer.look_at(Vec3::new(10.0, 10.0, 10.0), Vec3::ZERO);
+
+    while viewer.render_frame(&mut world).await {
+        if viewer.simulating() {
+            world.step();
+        }
+    }
+    Ok(())
 }

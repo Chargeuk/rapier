@@ -1,0 +1,57 @@
+use rapier_testbed3d::TestbedViewer;
+use rapier3d::prelude::*;
+
+pub async fn run(viewer: &mut TestbedViewer) -> anyhow::Result<()> {
+    /*
+     * World
+     */
+    let mut world = PhysicsWorld::new();
+
+    /*
+     * Create the balls
+     */
+    let num = 50;
+    let rad = 1.0;
+
+    let shift = rad * 2.0 + 1.0;
+    let centerx = shift * (num as f32) / 2.0;
+    let centery = shift / 2.0;
+    let centerz = shift * (num as f32) / 2.0;
+
+    for i in 0..num {
+        for j in 0usize..num {
+            for k in 0..num {
+                let x = i as f32 * shift - centerx;
+                let y = j as f32 * shift + centery;
+                let z = k as f32 * shift - centerz;
+
+                let status = if j == 0 {
+                    RigidBodyType::Fixed
+                } else {
+                    RigidBodyType::Dynamic
+                };
+                let density = 0.477;
+
+                // Build the rigid body.
+                let rigid_body = RigidBodyBuilder::new(status)
+                    .translation(Vec3::new(x, y, z))
+                    .sleeping(true); // j < num - 1);
+                let collider = ColliderBuilder::ball(rad).density(density);
+                let _ = world.insert(rigid_body, collider);
+            }
+        }
+    }
+
+    /*
+     * Set up the testbed.
+     */
+    viewer.set_world(&mut world);
+    viewer.look_at(Vec3::new(100.0, 100.0, 100.0), Vec3::ZERO);
+
+    while viewer.render_frame(&mut world).await {
+        if viewer.simulating() {
+            world.step();
+        }
+    }
+    Ok(())
+}

@@ -1,0 +1,110 @@
+use rapier_testbed2d::TestbedViewer;
+use rapier2d::prelude::*;
+
+pub async fn run(viewer: &mut TestbedViewer) -> anyhow::Result<()> {
+    /*
+     * World
+     */
+    let mut world = PhysicsWorld::new();
+
+    #[allow(clippy::excessive_precision)]
+    let mut ps1 = [
+        Vector::new(16.0, 0.0),
+        Vector::new(14.93803712795643, 5.133601056842984),
+        Vector::new(13.79871746027416, 10.24928069555078),
+        Vector::new(12.56252963284711, 15.34107019122473),
+        Vector::new(11.20040987372525, 20.39856541571217),
+        Vector::new(9.66521217819836, 25.40369899225096),
+        Vector::new(7.87179930638133, 30.3179337000085),
+        Vector::new(5.635199558196225, 35.03820717801641),
+        Vector::new(2.405937953536585, 39.09554102558315),
+    ];
+
+    #[allow(clippy::excessive_precision)]
+    let mut ps2 = [
+        Vector::new(24.0, 0.0),
+        Vector::new(22.33619528222415, 6.02299846205841),
+        Vector::new(20.54936888969905, 12.00964361211476),
+        Vector::new(18.60854610798073, 17.9470321677465),
+        Vector::new(16.46769273811807, 23.81367936585418),
+        Vector::new(14.05325025774858, 29.57079353071012),
+        Vector::new(11.23551045834022, 35.13775818285372),
+        Vector::new(7.752568160730571, 40.30450679009583),
+        Vector::new(3.016931552701656, 44.28891593799322),
+    ];
+
+    let scale = 0.25;
+    let friction = 0.6;
+
+    for i in 0..9 {
+        ps1[i] *= scale;
+        ps2[i] *= scale;
+    }
+
+    /*
+     * Ground
+     */
+    let collider =
+        ColliderBuilder::segment(Vector::new(-100.0, 0.0), Vector::new(100.0, 0.0)).friction(0.6);
+    world.insert_collider(collider, None);
+
+    /*
+     * Create the arch
+     */
+    for i in 0..8 {
+        let ps = [ps1[i], ps2[i], ps2[i + 1], ps1[i + 1]];
+        let rigid_body = RigidBodyBuilder::dynamic();
+        let collider = ColliderBuilder::convex_hull(&ps)
+            .unwrap()
+            .friction(friction);
+        let _ = world.insert(rigid_body, collider);
+    }
+
+    for i in 0..8 {
+        let ps = [
+            Vector::new(-ps2[i].x, ps2[i].y),
+            Vector::new(-ps1[i].x, ps1[i].y),
+            Vector::new(-ps1[i + 1].x, ps1[i + 1].y),
+            Vector::new(-ps2[i + 1].x, ps2[i + 1].y),
+        ];
+        let rigid_body = RigidBodyBuilder::dynamic();
+        let collider = ColliderBuilder::convex_hull(&ps)
+            .unwrap()
+            .friction(friction);
+        let _ = world.insert(rigid_body, collider);
+    }
+
+    {
+        let ps = [
+            ps1[8],
+            ps2[8],
+            Vector::new(-ps1[8].x, ps1[8].y),
+            Vector::new(-ps2[8].x, ps2[8].y),
+        ];
+        let rigid_body = RigidBodyBuilder::dynamic();
+        let collider = ColliderBuilder::convex_hull(&ps)
+            .unwrap()
+            .friction(friction);
+        let _ = world.insert(rigid_body, collider);
+    }
+
+    for i in 0..4 {
+        let rigid_body = RigidBodyBuilder::dynamic()
+            .translation(Vector::new(0.0, 0.5 + ps2[8].y + 1.0 * i as f32));
+        let collider = ColliderBuilder::cuboid(2.0, 0.5).friction(friction);
+        let _ = world.insert(rigid_body, collider);
+    }
+
+    /*
+     * Set up the testbed.
+     */
+    viewer.set_world(&mut world);
+    viewer.look_at(Vec2::new(0.0, 2.5), 20.0);
+
+    while viewer.render_frame(&mut world).await {
+        if viewer.simulating() {
+            world.step();
+        }
+    }
+    Ok(())
+}

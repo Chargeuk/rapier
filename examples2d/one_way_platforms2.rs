@@ -1,5 +1,5 @@
+use rapier_testbed2d::TestbedViewer;
 use rapier2d::prelude::*;
-use rapier_testbed2d::Testbed;
 
 struct OneWayPlatformHook {
     platform1: ColliderHandle,
@@ -20,24 +20,24 @@ impl PhysicsHooks for OneWayPlatformHook {
         // - If context.collider_handle2 == self.platform1 then the allowed normal is -y.
         // - If context.collider_handle1 == self.platform2 then its allowed normal +y needs to be flipped to -y.
         // - If context.collider_handle2 == self.platform2 then the allowed normal -y needs to be flipped to +y.
-        let mut allowed_local_n1 = Vector::zeros();
+        let mut allowed_local_n1 = Vector::ZERO;
 
         if context.collider1 == self.platform1 {
-            allowed_local_n1 = Vector::y();
+            allowed_local_n1 = Vector::Y;
         } else if context.collider2 == self.platform1 {
             // Flip the allowed direction.
-            allowed_local_n1 = -Vector::y();
+            allowed_local_n1 = -Vector::Y;
         }
 
         if context.collider1 == self.platform2 {
-            allowed_local_n1 = -Vector::y();
+            allowed_local_n1 = -Vector::Y;
         } else if context.collider2 == self.platform2 {
             // Flip the allowed direction.
-            allowed_local_n1 = Vector::y();
+            allowed_local_n1 = Vector::Y;
         }
 
         // Call the helper function that simulates one-way platforms.
-        context.update_as_oneway_platform(&allowed_local_n1, 0.1);
+        context.update_as_oneway_platform(allowed_local_n1, 0.1);
 
         // Set the surface velocity of the accepted contacts.
         let tangent_velocity =
@@ -47,35 +47,32 @@ impl PhysicsHooks for OneWayPlatformHook {
                 12.0
             };
 
-        for contact in context.solver_contacts.iter_mut() {
-            contact.tangent_velocity.x = tangent_velocity;
+        if let Some(rigid) = context.rigid_mut() {
+            for contact in rigid.solver_contacts.iter_mut() {
+                contact.tangent_velocity.x = tangent_velocity;
+            }
         }
     }
 }
 
-pub fn init_world(testbed: &mut Testbed) {
+pub async fn run(viewer: &mut TestbedViewer) -> anyhow::Result<()> {
     /*
      * World
      */
-    let mut bodies = RigidBodySet::new();
-    let mut colliders = ColliderSet::new();
-    let impulse_joints = ImpulseJointSet::new();
-    let multibody_joints = MultibodyJointSet::new();
+    let mut world = PhysicsWorld::new();
 
     /*
      * Ground
      */
     let rigid_body = RigidBodyBuilder::fixed();
-    let handle = bodies.insert(rigid_body);
-
     let collider = ColliderBuilder::cuboid(25.0, 0.5)
-        .translation(vector![30.0, 2.0])
+        .translation(Vector::new(30.0, 2.0))
         .active_hooks(ActiveHooks::MODIFY_SOLVER_CONTACTS);
-    let platform1 = colliders.insert_with_parent(collider, handle, &mut bodies);
+    let (handle, platform1) = world.insert(rigid_body, collider);
     let collider = ColliderBuilder::cuboid(25.0, 0.5)
-        .translation(vector![-30.0, -2.0])
+        .translation(Vector::new(-30.0, -2.0))
         .active_hooks(ActiveHooks::MODIFY_SOLVER_CONTACTS);
-    let platform2 = colliders.insert_with_parent(collider, handle, &mut bodies);
+    let platform2 = world.insert_collider(collider, Some(handle));
 
     /*
      * Setup the one-way platform hook.
@@ -86,44 +83,42 @@ pub fn init_world(testbed: &mut Testbed) {
     };
 
     /*
-     * Spawn cubes at regular intervals and apply a custom gravity
-     * depending on their position.
-     */
-    testbed.add_callback(move |graphics, physics, _, run_state| {
-        if run_state.timestep_id % 50 == 0 && physics.bodies.len() <= 7 {
-            // Spawn a new cube.
-            let collider = ColliderBuilder::cuboid(1.5, 2.0);
-            let body = RigidBodyBuilder::dynamic().translation(vector![20.0, 10.0]);
-            let handle = physics.bodies.insert(body);
-            physics
-                .colliders
-                .insert_with_parent(collider, handle, &mut physics.bodies);
-
-            if let Some(graphics) = graphics {
-                graphics.add_body(handle, &physics.bodies, &physics.colliders);
-            }
-        }
-
-        for handle in physics.islands.active_dynamic_bodies() {
-            let body = &mut physics.bodies[*handle];
-            if body.position().translation.y > 1.0 {
-                body.set_gravity_scale(1.0, false);
-            } else if body.position().translation.y < -1.0 {
-                body.set_gravity_scale(-1.0, false);
-            }
-        }
-    });
-
-    /*
      * Set up the testbed.
      */
-    testbed.set_world_with_params(
-        bodies,
-        colliders,
-        impulse_joints,
-        multibody_joints,
-        vector![0.0, -9.81],
-        physics_hooks,
-    );
-    testbed.look_at(point![0.0, 0.0], 20.0);
+    viewer.set_world(&mut world);
+    viewer.look_at(Vec2::ZERO, 20.0);
+
+    let mut step_id = 0usize;
+    while viewer.render_frame(&mut world).await {
+        if viewer.simulating() {
+            world.step_with_events(&physics_hooks, &());
+            step_id += 1;
+
+            /*
+             * Spawn cubes at regular intervals and apply a custom gravity
+             * depending on their position.
+             */
+            if step_id.is_multiple_of(200) && world.bodies.len() <= 7 {
+                // Spawn a new cube.
+                let collider = ColliderBuilder::cuboid(1.5, 2.0);
+                let body = RigidBodyBuilder::dynamic().translation(Vector::new(20.0, 10.0));
+                let handle = world.bodies.insert(body);
+                world
+                    .colliders
+                    .insert_with_parent(collider, handle, &mut world.bodies);
+
+                viewer.add_body(handle, &world);
+            }
+
+            for handle in world.islands.active_bodies() {
+                let body = &mut world.bodies[handle];
+                if body.position().translation.y > 1.0 {
+                    body.set_gravity_scale(1.0, false);
+                } else if body.position().translation.y < -1.0 {
+                    body.set_gravity_scale(-1.0, false);
+                }
+            }
+        }
+    }
+    Ok(())
 }

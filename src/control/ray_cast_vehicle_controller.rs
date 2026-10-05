@@ -1,16 +1,23 @@
 //! A vehicle controller based on ray-casting, ported and modified from Bullet’s `btRaycastVehicle`.
+use crate::alloc_prelude::*;
+
+#[cfg(not(feature = "std"))]
+use simba::scalar::ComplexField;
 
 use crate::dynamics::{RigidBody, RigidBodyHandle, RigidBodySet};
 use crate::geometry::{ColliderHandle, ColliderSet, Ray};
-use crate::math::{Point, Real, Rotation, Vector};
-use crate::pipeline::{QueryFilter, QueryPipeline};
-use crate::utils::{WCross, WDot};
+use crate::math::{Real, Vector, VectorExt, rotation_from_angle};
+use crate::pipeline::QueryPipeline;
+use crate::prelude::QueryPipelineMut;
+use crate::utils::{CrossProduct, DotProduct};
 
 /// A character controller to simulate vehicles using ray-casting for the wheels.
+#[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
+#[derive(Clone, Debug)]
 pub struct DynamicRayCastVehicleController {
     wheels: Vec<Wheel>,
-    forward_ws: Vec<Vector<Real>>,
-    axle: Vec<Vector<Real>>,
+    forward_ws: Vec<Vector>,
+    axle: Vec<Vector>,
     /// The current forward speed of the vehicle.
     pub current_vehicle_speed: Real,
 
@@ -22,6 +29,7 @@ pub struct DynamicRayCastVehicleController {
     pub index_forward_axis: usize,
 }
 
+#[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
 #[derive(Copy, Clone, Debug, PartialEq)]
 /// Parameters affecting the physical behavior of a wheel.
 pub struct WheelTuning {
@@ -37,7 +45,9 @@ pub struct WheelTuning {
     pub suspension_damping: Real,
     /// The maximum distance the suspension can travel before and after its resting length.
     pub max_suspension_travel: Real,
-    /// Parameter controlling how much traction the tire his.
+    /// The multiplier of friction between a tire and the collider it's on top of.
+    pub side_friction_stiffness: Real,
+    /// Parameter controlling how much traction the tire has.
     ///
     /// The larger the value, the more instantaneous braking will happen (with the risk of
     /// causing the vehicle to flip if it’s too strong).
@@ -53,6 +63,7 @@ impl Default for WheelTuning {
             suspension_compression: 0.83,
             suspension_damping: 0.88,
             max_suspension_travel: 5.0,
+            side_friction_stiffness: 1.0,
             friction_slip: 10.5,
             max_suspension_force: 6000.0,
         }
@@ -62,13 +73,13 @@ impl Default for WheelTuning {
 /// Objects used to initialize a wheel.
 struct WheelDesc {
     /// The position of the wheel, relative to the chassis.
-    pub chassis_connection_cs: Point<Real>,
+    pub chassis_connection_cs: Vector,
     /// The direction of the wheel’s suspension, relative to the chassis.
     ///
     /// The ray-casting will happen following this direction to detect the ground.
-    pub direction_cs: Vector<Real>,
+    pub direction_cs: Vector,
     /// The wheel’s axle axis, relative to the chassis.
-    pub axle_cs: Vector<Real>,
+    pub axle_cs: Vector,
     /// The rest length of the wheel’s suspension spring.
     pub suspension_rest_length: Real,
     /// The maximum distance the suspension can travel before and after its resting length.
@@ -86,32 +97,35 @@ struct WheelDesc {
     ///
     /// Increase this value if the suspension appears to overshoot.
     pub damping_relaxation: Real,
-    /// Parameter controlling how much traction the tire his.
+    /// Parameter controlling how much traction the tire has.
     ///
     /// The larger the value, the more instantaneous braking will happen (with the risk of
     /// causing the vehicle to flip if it’s too strong).
     pub friction_slip: Real,
     /// The maximum force applied by the suspension.
     pub max_suspension_force: Real,
+    /// The multiplier of friction between a tire and the collider it's on top of.
+    pub side_friction_stiffness: Real,
 }
 
+#[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
 #[derive(Copy, Clone, Debug, PartialEq)]
 /// A wheel attached to a vehicle.
 pub struct Wheel {
     raycast_info: RayCastInfo,
 
-    center: Point<Real>,
-    wheel_direction_ws: Vector<Real>,
-    wheel_axle_ws: Vector<Real>,
+    center: Vector,
+    wheel_direction_ws: Vector,
+    wheel_axle_ws: Vector,
 
     /// The position of the wheel, relative to the chassis.
-    pub chassis_connection_point_cs: Point<Real>,
+    pub chassis_connection_point_cs: Vector,
     /// The direction of the wheel’s suspension, relative to the chassis.
     ///
     /// The ray-casting will happen following this direction to detect the ground.
-    pub direction_cs: Vector<Real>,
+    pub direction_cs: Vector,
     /// The wheel’s axle axis, relative to the chassis.
-    pub axle_cs: Vector<Real>,
+    pub axle_cs: Vector,
     /// The rest length of the wheel’s suspension spring.
     pub suspension_rest_length: Real,
     /// The maximum distance the suspension can travel before and after its resting length.
@@ -128,11 +142,13 @@ pub struct Wheel {
     ///
     /// Increase this value if the suspension appears to overshoot.
     pub damping_relaxation: Real,
-    /// Parameter controlling how much traction the tire his.
+    /// Parameter controlling how much traction the tire has.
     ///
     /// The larger the value, the more instantaneous braking will happen (with the risk of
     /// causing the vehicle to flip if it’s too strong).
-    friction_slip: Real,
+    pub friction_slip: Real,
+    /// The multiplier of friction between a tire and the collider it's on top of.
+    pub side_friction_stiffness: Real,
     /// The wheel’s current rotation on its axle.
     pub rotation: Real,
     delta_rotation: Real,
@@ -174,7 +190,7 @@ impl Wheel {
             axle_cs: info.axle_cs,
             wheel_direction_ws: info.direction_cs,
             wheel_axle_ws: info.axle_cs,
-            center: Point::origin(),
+            center: Vector::ZERO,
             friction_slip: info.friction_slip,
             steering: 0.0,
             engine_force: 0.0,
@@ -189,34 +205,49 @@ impl Wheel {
             skid_info: 0.0,
             side_impulse: 0.0,
             forward_impulse: 0.0,
+            side_friction_stiffness: info.side_friction_stiffness,
         }
     }
 
+    /// Information about suspension and the ground obtained from the ray-casting
+    /// for this wheel.
+    pub fn raycast_info(&self) -> &RayCastInfo {
+        &self.raycast_info
+    }
+
     /// The world-space center of the wheel.
-    pub fn center(&self) -> Point<Real> {
+    pub fn center(&self) -> Vector {
         self.center
     }
 
     /// The world-space direction of the wheel’s suspension.
-    pub fn suspension(&self) -> Vector<Real> {
+    pub fn suspension(&self) -> Vector {
         self.wheel_direction_ws
     }
 
     /// The world-space direction of the wheel’s axle.
-    pub fn axle(&self) -> Vector<Real> {
+    pub fn axle(&self) -> Vector {
         self.wheel_axle_ws
     }
 }
 
+/// Information about suspension and the ground obtained from the ray-casting
+/// to simulate a wheel’s suspension.
+#[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
 #[derive(Copy, Clone, Debug, PartialEq, Default)]
-struct RayCastInfo {
-    // set by raycaster
-    contact_normal_ws: Vector<Real>, //contact normal
-    contact_point_ws: Point<Real>,   //raycast hitpoint
-    suspension_length: Real,
-    hard_point_ws: Point<Real>, //raycast starting point
-    is_in_contact: bool,
-    ground_object: Option<ColliderHandle>,
+pub struct RayCastInfo {
+    /// The (world-space) contact normal between the wheel and the floor.
+    pub contact_normal_ws: Vector,
+    /// The (world-space) point hit by the wheel’s ray-cast.
+    pub contact_point_ws: Vector,
+    /// The suspension length for the wheel.
+    pub suspension_length: Real,
+    /// The (world-space) starting point of the ray-cast.
+    pub hard_point_ws: Vector,
+    /// Is the wheel in contact with the ground?
+    pub is_in_contact: bool,
+    /// The collider hit by the ray-cast.
+    pub ground_object: Option<ColliderHandle>,
 }
 
 impl DynamicRayCastVehicleController {
@@ -241,9 +272,9 @@ impl DynamicRayCastVehicleController {
     /// Adds a wheel to this vehicle.
     pub fn add_wheel(
         &mut self,
-        chassis_connection_cs: Point<Real>,
-        direction_cs: Vector<Real>,
-        axle_cs: Vector<Real>,
+        chassis_connection_cs: Vector,
+        direction_cs: Vector,
+        axle_cs: Vector,
         suspension_rest_length: Real,
         radius: Real,
         tuning: &WheelTuning,
@@ -260,6 +291,7 @@ impl DynamicRayCastVehicleController {
             friction_slip: tuning.friction_slip,
             max_suspension_travel: tuning.max_suspension_travel,
             max_suspension_force: tuning.max_suspension_force,
+            side_friction_stiffness: tuning.side_friction_stiffness,
         };
 
         let wheel_id = self.wheels.len();
@@ -272,9 +304,8 @@ impl DynamicRayCastVehicleController {
     fn update_wheel_transform(&mut self, chassis: &RigidBody, wheel_index: usize) {
         self.update_wheel_transforms_ws(chassis, wheel_index);
         let wheel = &mut self.wheels[wheel_index];
-        wheel.center = (wheel.raycast_info.hard_point_ws
-            + wheel.wheel_direction_ws * wheel.raycast_info.suspension_length)
-            .coords;
+        wheel.center = wheel.raycast_info.hard_point_ws
+            + wheel.wheel_direction_ws * wheel.raycast_info.suspension_length;
     }
 
     #[cfg(feature = "dim3")]
@@ -282,8 +313,8 @@ impl DynamicRayCastVehicleController {
         self.update_wheel_transforms_ws(chassis, wheel_index);
         let wheel = &mut self.wheels[wheel_index];
 
-        let steering_orn = Rotation::new(-wheel.wheel_direction_ws * wheel.steering);
-        wheel.wheel_axle_ws = steering_orn * (chassis.position() * wheel.axle_cs);
+        let steering_orn = rotation_from_angle(-wheel.wheel_direction_ws * wheel.steering);
+        wheel.wheel_axle_ws = steering_orn * (chassis.position().rotation * wheel.axle_cs);
         wheel.center = wheel.raycast_info.hard_point_ws
             + wheel.wheel_direction_ws * wheel.raycast_info.suspension_length;
     }
@@ -295,32 +326,25 @@ impl DynamicRayCastVehicleController {
         let chassis_transform = chassis.position();
 
         wheel.raycast_info.hard_point_ws = chassis_transform * wheel.chassis_connection_point_cs;
-        wheel.wheel_direction_ws = chassis_transform * wheel.direction_cs;
-        wheel.wheel_axle_ws = chassis_transform * wheel.axle_cs;
+        wheel.wheel_direction_ws = chassis_transform.rotation * wheel.direction_cs;
+        wheel.wheel_axle_ws = chassis_transform.rotation * wheel.axle_cs;
     }
 
-    fn ray_cast(
-        &mut self,
-        bodies: &RigidBodySet,
-        colliders: &ColliderSet,
-        queries: &QueryPipeline,
-        filter: QueryFilter,
-        chassis: &RigidBody,
-        wheel_id: usize,
-    ) {
+    #[profiling::function]
+    fn ray_cast(&mut self, queries: &QueryPipeline, chassis: &RigidBody, wheel_id: usize) {
         let wheel = &mut self.wheels[wheel_id];
         let raylen = wheel.suspension_rest_length + wheel.radius;
         let rayvector = wheel.wheel_direction_ws * raylen;
         let source = wheel.raycast_info.hard_point_ws;
         wheel.raycast_info.contact_point_ws = source + rayvector;
         let ray = Ray::new(source, rayvector);
-        let hit = queries.cast_ray_and_get_normal(bodies, colliders, &ray, 1.0, true, filter);
+        let hit = queries.cast_ray_and_get_normal(&ray, 1.0, true);
 
         wheel.raycast_info.ground_object = None;
 
         if let Some((collider_hit, mut hit)) = hit {
-            if hit.toi == 0.0 {
-                let collider = &colliders[collider_hit];
+            if hit.time_of_impact == 0.0 {
+                let collider = &queries.colliders[collider_hit];
                 let up_ray = Ray::new(source + rayvector, -rayvector);
                 if let Some(hit2) =
                     collider
@@ -330,7 +354,7 @@ impl DynamicRayCastVehicleController {
                     hit.normal = -hit2.normal;
                 }
 
-                if hit.normal == Vector::zeros() {
+                if hit.normal == Vector::ZERO {
                     // If the hit is still not defined, set the normal.
                     hit.normal = -wheel.wheel_direction_ws;
                 }
@@ -340,7 +364,7 @@ impl DynamicRayCastVehicleController {
             wheel.raycast_info.is_in_contact = true;
             wheel.raycast_info.ground_object = Some(collider_hit);
 
-            let hit_distance = hit.toi * raylen;
+            let hit_distance = hit.time_of_impact * raylen;
             wheel.raycast_info.suspension_length = hit_distance - wheel.radius;
 
             // clamp on max suspension travel
@@ -350,18 +374,18 @@ impl DynamicRayCastVehicleController {
                 .raycast_info
                 .suspension_length
                 .clamp(min_suspension_length, max_suspension_length);
-            wheel.raycast_info.contact_point_ws = ray.point_at(hit.toi);
+            wheel.raycast_info.contact_point_ws = ray.point_at(hit.time_of_impact);
 
             let denominator = wheel
                 .raycast_info
                 .contact_normal_ws
-                .dot(&wheel.wheel_direction_ws);
+                .dot(wheel.wheel_direction_ws);
             let chassis_velocity_at_contact_point =
-                chassis.velocity_at_point(&wheel.raycast_info.contact_point_ws);
+                chassis.velocity_at_point(wheel.raycast_info.contact_point_ws);
             let proj_vel = wheel
                 .raycast_info
                 .contact_normal_ws
-                .dot(&chassis_velocity_at_contact_point);
+                .dot(chassis_velocity_at_contact_point);
 
             if denominator >= -0.1 {
                 wheel.suspension_relative_velocity = 0.0;
@@ -381,24 +405,18 @@ impl DynamicRayCastVehicleController {
     }
 
     /// Updates the vehicle’s velocity based on its suspension, engine force, and brake.
-    pub fn update_vehicle(
-        &mut self,
-        dt: Real,
-        bodies: &mut RigidBodySet,
-        colliders: &ColliderSet,
-        queries: &QueryPipeline,
-        filter: QueryFilter,
-    ) {
+    #[profiling::function]
+    pub fn update_vehicle(&mut self, dt: Real, queries: QueryPipelineMut) {
         let num_wheels = self.wheels.len();
-        let chassis = &bodies[self.chassis];
+        let chassis = &queries.bodies[self.chassis];
 
         for i in 0..num_wheels {
             self.update_wheel_transform(chassis, i);
         }
 
-        self.current_vehicle_speed = chassis.linvel().norm();
+        self.current_vehicle_speed = chassis.linvel().length();
 
-        let forward_w = chassis.position() * Vector::ith(self.index_forward_axis, 1.0);
+        let forward_w = chassis.position().rotation * Vector::ith(self.index_forward_axis, 1.0);
 
         if forward_w.dot(chassis.linvel()) < 0.0 {
             self.current_vehicle_speed *= -1.0;
@@ -409,13 +427,14 @@ impl DynamicRayCastVehicleController {
         //
 
         for wheel_id in 0..self.wheels.len() {
-            self.ray_cast(bodies, colliders, queries, filter, chassis, wheel_id);
+            self.ray_cast(&queries.as_ref(), chassis, wheel_id);
         }
 
         let chassis_mass = chassis.mass();
         self.update_suspension(chassis_mass);
 
-        let chassis = bodies
+        let chassis = queries
+            .bodies
             .get_mut_internal_with_modification_tracking(self.chassis)
             .unwrap();
 
@@ -435,21 +454,28 @@ impl DynamicRayCastVehicleController {
             chassis.apply_impulse_at_point(impulse, wheel.raycast_info.contact_point_ws, false);
         }
 
-        self.update_friction(bodies, colliders, dt);
+        self.update_friction(queries.bodies, queries.colliders, dt);
 
-        let chassis = bodies
+        let chassis = queries
+            .bodies
             .get_mut_internal_with_modification_tracking(self.chassis)
             .unwrap();
 
         for wheel in &mut self.wheels {
-            let vel = chassis.velocity_at_point(&wheel.raycast_info.hard_point_ws);
+            let vel = chassis.velocity_at_point(wheel.raycast_info.hard_point_ws);
 
             if wheel.raycast_info.is_in_contact {
-                let mut fwd = chassis.position() * Vector::ith(self.index_forward_axis, 1.0);
-                let proj = fwd.dot(&wheel.raycast_info.contact_normal_ws);
-                fwd -= wheel.raycast_info.contact_normal_ws * proj;
+                // Use the same per-wheel forward direction as `update_friction` (rolling
+                // direction on the contact plane) instead of the chassis' forward axis:
+                // the latter yields a zero or sign-flipped rotation whenever it doesn't
+                // match the wheel's actual rolling direction.
+                let fwd = wheel
+                    .raycast_info
+                    .contact_normal_ws
+                    .cross(wheel.wheel_axle_ws)
+                    .normalize_or_zero();
 
-                let proj2 = fwd.dot(&vel);
+                let proj2 = fwd.dot(vel);
 
                 wheel.delta_rotation = (proj2 * dt) / (wheel.radius);
                 wheel.rotation += wheel.delta_rotation;
@@ -509,8 +535,7 @@ impl DynamicRayCastVehicleController {
         }
     }
 
-    const SIDE_FRICTION_STIFFNESS2: Real = 1.0;
-
+    #[profiling::function]
     fn update_friction(&mut self, bodies: &mut RigidBodySet, colliders: &ColliderSet, dt: Real) {
         let num_wheels = self.wheels.len();
 
@@ -544,15 +569,10 @@ impl DynamicRayCastVehicleController {
                     self.axle[i] = wheel.wheel_axle_ws;
 
                     let surf_normal_ws = wheel.raycast_info.contact_normal_ws;
-                    let proj = self.axle[i].dot(&surf_normal_ws);
+                    let proj = self.axle[i].dot(surf_normal_ws);
                     self.axle[i] -= surf_normal_ws * proj;
-                    self.axle[i] = self.axle[i]
-                        .try_normalize(1.0e-5)
-                        .unwrap_or_else(Vector::zeros);
-                    self.forward_ws[i] = surf_normal_ws
-                        .cross(&self.axle[i])
-                        .try_normalize(1.0e-5)
-                        .unwrap_or_else(Vector::zeros);
+                    self.axle[i] = self.axle[i].normalize_or_zero();
+                    self.forward_ws[i] = surf_normal_ws.cross(self.axle[i]).normalize_or_zero();
 
                     if let Some(ground_body) = ground_object
                         .and_then(|h| colliders[h].parent())
@@ -561,20 +581,20 @@ impl DynamicRayCastVehicleController {
                     {
                         wheel.side_impulse = resolve_single_bilateral(
                             &bodies[self.chassis],
-                            &wheel.raycast_info.contact_point_ws,
-                            &ground_body,
-                            &wheel.raycast_info.contact_point_ws,
-                            &self.axle[i],
+                            wheel.raycast_info.contact_point_ws,
+                            ground_body,
+                            wheel.raycast_info.contact_point_ws,
+                            self.axle[i],
                         );
                     } else {
                         wheel.side_impulse = resolve_single_unilateral(
                             &bodies[self.chassis],
-                            &wheel.raycast_info.contact_point_ws,
-                            &self.axle[i],
+                            wheel.raycast_info.contact_point_ws,
+                            self.axle[i],
                         );
                     }
 
-                    wheel.side_impulse *= Self::SIDE_FRICTION_STIFFNESS2;
+                    wheel.side_impulse *= wheel.side_friction_stiffness;
                 }
             }
         }
@@ -644,11 +664,9 @@ impl DynamicRayCastVehicleController {
 
         if sliding {
             for wheel in &mut self.wheels {
-                if wheel.side_impulse != 0.0 {
-                    if wheel.skid_info < 1.0 {
-                        wheel.forward_impulse *= wheel.skid_info;
-                        wheel.side_impulse *= wheel.skid_info;
-                    }
+                if wheel.skid_info < 1.0 {
+                    wheel.forward_impulse *= wheel.skid_info;
+                    wheel.side_impulse *= wheel.skid_info;
                 }
             }
         }
@@ -676,7 +694,7 @@ impl DynamicRayCastVehicleController {
                     let v_chassis_world_up =
                         chassis.position().rotation * Vector::ith(self.index_up_axis, 1.0);
                     impulse_point -= v_chassis_world_up
-                        * (v_chassis_world_up.dot(&(impulse_point - chassis.center_of_mass()))
+                        * (v_chassis_world_up.dot(impulse_point - chassis.center_of_mass())
                             * (1.0 - wheel.roll_influence));
 
                     chassis.apply_impulse_at_point(side_impulse, impulse_point, false);
@@ -697,8 +715,8 @@ impl DynamicRayCastVehicleController {
 struct WheelContactPoint<'a> {
     body0: &'a RigidBody,
     body1: Option<&'a RigidBody>,
-    friction_position_world: Point<Real>,
-    friction_direction_world: Vector<Real>,
+    friction_position_world: Vector,
+    friction_direction_world: Vector,
     jac_diag_ab_inv: Real,
     max_impulse: Real,
 }
@@ -707,24 +725,21 @@ impl<'a> WheelContactPoint<'a> {
     pub fn new(
         body0: &'a RigidBody,
         body1: Option<&'a RigidBody>,
-        friction_position_world: Point<Real>,
-        friction_direction_world: Vector<Real>,
+        friction_position_world: Vector,
+        friction_direction_world: Vector,
         max_impulse: Real,
     ) -> Self {
-        fn impulse_denominator(body: &RigidBody, pos: &Point<Real>, n: &Vector<Real>) -> Real {
+        fn impulse_denominator(body: &RigidBody, pos: Vector, n: Vector) -> Real {
             let dpt = pos - body.center_of_mass();
-            let gcross = dpt.gcross(*n);
-            let v = (body.mprops.effective_world_inv_inertia_sqrt
-                * (body.mprops.effective_world_inv_inertia_sqrt * gcross))
-                .gcross(dpt);
+            let gcross = dpt.gcross(n);
+            let v = (body.mprops.effective_world_inv_inertia * gcross).gcross(dpt);
             // TODO: take the effective inv mass into account instead of the inv_mass?
-            body.mprops.local_mprops.inv_mass + n.dot(&v)
+            body.mprops.local_mprops.inv_mass + n.dot(v)
         }
-        let denom0 =
-            impulse_denominator(body0, &friction_position_world, &friction_direction_world);
+        let denom0 = impulse_denominator(body0, friction_position_world, friction_direction_world);
         let denom1 = body1
             .map(|body1| {
-                impulse_denominator(body1, &friction_position_world, &friction_direction_world)
+                impulse_denominator(body1, friction_position_world, friction_direction_world)
             })
             .unwrap_or(0.0);
         let relaxation = 1.0;
@@ -744,13 +759,13 @@ impl<'a> WheelContactPoint<'a> {
         let contact_pos_world = self.friction_position_world;
         let max_impulse = self.max_impulse;
 
-        let vel1 = self.body0.velocity_at_point(&contact_pos_world);
+        let vel1 = self.body0.velocity_at_point(contact_pos_world);
         let vel2 = self
             .body1
-            .map(|b| b.velocity_at_point(&contact_pos_world))
-            .unwrap_or_else(Vector::zeros);
+            .map(|b| b.velocity_at_point(contact_pos_world))
+            .unwrap_or_default();
         let vel = vel1 - vel2;
-        let vrel = self.friction_direction_world.dot(&vel);
+        let vrel = self.friction_direction_world.dot(vel);
 
         // calculate friction that moves us to zero relative velocity
         (-vrel * self.jac_diag_ab_inv / (num_wheels_on_ground as Real))
@@ -760,10 +775,10 @@ impl<'a> WheelContactPoint<'a> {
 
 fn resolve_single_bilateral(
     body1: &RigidBody,
-    pt1: &Point<Real>,
+    pt1: Vector,
     body2: &RigidBody,
-    pt2: &Point<Real>,
-    normal: &Vector<Real>,
+    pt2: Vector,
+    normal: Vector,
 ) -> Real {
     let vel1 = body1.velocity_at_point(pt1);
     let vel2 = body2.velocity_at_point(pt2);
@@ -771,10 +786,10 @@ fn resolve_single_bilateral(
 
     let dpt1 = pt1 - body1.center_of_mass();
     let dpt2 = pt2 - body2.center_of_mass();
-    let aj = dpt1.gcross(*normal);
-    let bj = dpt2.gcross(-*normal);
-    let iaj = body1.mprops.effective_world_inv_inertia_sqrt * aj;
-    let ibj = body2.mprops.effective_world_inv_inertia_sqrt * bj;
+    let aj = dpt1.gcross(normal);
+    let bj = dpt2.gcross(-normal);
+    let iaj = body1.mprops.effective_world_inv_inertia * aj;
+    let ibj = body2.mprops.effective_world_inv_inertia * bj;
 
     // TODO: take the effective_inv_mass into account?
     let im1 = body1.mprops.local_mprops.inv_mass;
@@ -782,25 +797,25 @@ fn resolve_single_bilateral(
 
     let jac_diag_ab = im1 + im2 + iaj.gdot(iaj) + ibj.gdot(ibj);
     let jac_diag_ab_inv = crate::utils::inv(jac_diag_ab);
-    let rel_vel = normal.dot(&dvel);
+    let rel_vel = normal.dot(dvel);
 
     //todo: move this into proper structure
     let contact_damping = 0.2;
     -contact_damping * rel_vel * jac_diag_ab_inv
 }
 
-fn resolve_single_unilateral(body1: &RigidBody, pt1: &Point<Real>, normal: &Vector<Real>) -> Real {
+fn resolve_single_unilateral(body1: &RigidBody, pt1: Vector, normal: Vector) -> Real {
     let vel1 = body1.velocity_at_point(pt1);
     let dvel = vel1;
     let dpt1 = pt1 - body1.center_of_mass();
-    let aj = dpt1.gcross(*normal);
-    let iaj = body1.mprops.effective_world_inv_inertia_sqrt * aj;
+    let aj = dpt1.gcross(normal);
+    let iaj = body1.mprops.effective_world_inv_inertia * aj;
 
     // TODO: take the effective_inv_mass into account?
     let im1 = body1.mprops.local_mprops.inv_mass;
     let jac_diag_ab = im1 + iaj.gdot(iaj);
     let jac_diag_ab_inv = crate::utils::inv(jac_diag_ab);
-    let rel_vel = normal.dot(&dvel);
+    let rel_vel = normal.dot(dvel);
 
     //todo: move this into proper structure
     let contact_damping = 0.2;

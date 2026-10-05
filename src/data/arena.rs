@@ -1,20 +1,28 @@
 //! Arena adapted from the generational-arena crate.
 //!
-//! See  https://github.com/fitzgen/generational-arena/blob/master/src/lib.rs.
+//! See <https://github.com/fitzgen/generational-arena/blob/master/src/lib.rs>.
 //! This has been modified to have a fully deterministic deserialization (including for the order of
-//! Index attribution after a deserialization of the arena.
-use parry::partitioning::IndexedData;
-use std::cmp;
-use std::iter::{self, Extend, FromIterator, FusedIterator};
-use std::mem;
-use std::ops;
-use std::slice;
-use std::vec;
+//! Index attribution after a deserialization of the arena).
+#[cfg(feature = "alloc")]
+use crate::alloc_prelude::*;
+#[cfg(feature = "alloc")]
+use alloc::vec;
+#[cfg(feature = "alloc")]
+use core::cmp;
+#[cfg(feature = "alloc")]
+use core::iter::{self, Extend, FromIterator, FusedIterator};
+#[cfg(feature = "alloc")]
+use core::mem;
+#[cfg(feature = "alloc")]
+use core::ops;
+#[cfg(feature = "alloc")]
+use core::slice;
 
 /// The `Arena` allows inserting and removing elements that are referred to by
 /// `Index`.
 ///
 /// [See the module-level documentation for example usage and motivation.](./index.html)
+#[cfg(feature = "alloc")]
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
 pub struct Arena<T> {
@@ -24,6 +32,7 @@ pub struct Arena<T> {
     len: usize,
 }
 
+#[cfg(feature = "alloc")]
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
 enum Entry<T> {
@@ -38,9 +47,8 @@ enum Entry<T> {
 ///
 /// # Examples
 ///
-/// ```ignore
-/// use rapier::data::arena::Arena;
-///
+/// ```
+/// # use rapier3d::data::arena::Arena;
 /// let mut arena = Arena::new();
 /// let idx = arena.insert(123);
 /// assert_eq!(arena[idx], 123);
@@ -55,16 +63,6 @@ pub struct Index {
 impl Default for Index {
     fn default() -> Self {
         Self::from_raw_parts(crate::INVALID_U32, crate::INVALID_U32)
-    }
-}
-
-impl IndexedData for Index {
-    fn default() -> Self {
-        Default::default()
-    }
-
-    fn index(&self) -> usize {
-        self.into_raw_parts().0 as usize
     }
 }
 
@@ -92,22 +90,24 @@ impl Index {
     }
 }
 
+#[cfg(feature = "alloc")]
 const DEFAULT_CAPACITY: usize = 4;
 
+#[cfg(feature = "alloc")]
 impl<T> Default for Arena<T> {
     fn default() -> Arena<T> {
         Arena::new()
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T> Arena<T> {
     /// Constructs a new, empty `Arena`.
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::<usize>::new();
     /// # let _ = arena;
     /// ```
@@ -121,9 +121,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::with_capacity(10);
     ///
     /// // These insertions will not require further allocation.
@@ -150,9 +149,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::with_capacity(1);
     /// arena.insert(42);
     /// arena.insert(43);
@@ -188,9 +186,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::new();
     ///
     /// match arena.try_insert(42) {
@@ -229,9 +226,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::{Arena, Index};
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::{Arena, Index};
     /// let mut arena = Arena::new();
     ///
     /// match arena.try_insert_with(|idx| (42, idx)) {
@@ -269,7 +265,7 @@ impl<T> Arena<T> {
                     self.free_list_head = next_free;
                     self.len += 1;
                     Some(Index {
-                        index: i as u32,
+                        index: i,
                         generation: self.generation,
                     })
                 }
@@ -283,9 +279,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::new();
     ///
     /// let idx = arena.insert(42);
@@ -306,9 +301,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::{Arena, Index};
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::{Arena, Index};
     /// let mut arena = Arena::new();
     ///
     /// let idx = arena.insert_with(|idx| (42, idx));
@@ -348,9 +342,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::new();
     /// let idx = arena.insert(42);
     ///
@@ -392,9 +385,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut crew = Arena::new();
     /// crew.extend(&["Jim Hawkins", "John Silver", "Alexander Smollett", "Israel Hands"]);
     /// let pirates = ["John Silver", "Israel Hands"]; // too dangerous to keep them around
@@ -433,9 +425,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::new();
     /// let idx = arena.insert(42);
     ///
@@ -454,9 +445,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::new();
     /// let idx = arena.insert(42);
     ///
@@ -480,9 +470,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::new();
     /// let idx = arena.insert(42);
     ///
@@ -511,9 +500,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::new();
     /// let idx1 = arena.insert(0);
     /// let idx2 = arena.insert(1);
@@ -576,9 +564,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::new();
     /// assert_eq!(arena.len(), 0);
     ///
@@ -599,9 +586,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::new();
     /// assert!(arena.is_empty());
     ///
@@ -623,9 +609,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::with_capacity(10);
     /// assert_eq!(arena.capacity(), 10);
     ///
@@ -651,9 +636,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::with_capacity(10);
     /// arena.reserve(5);
     /// assert_eq!(arena.capacity(), 15);
@@ -686,9 +670,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::new();
     /// for i in 0..10 {
     ///     arena.insert(i * i);
@@ -698,7 +681,7 @@ impl<T> Arena<T> {
     ///     println!("{} is at index {:?}", value, idx);
     /// }
     /// ```
-    pub fn iter(&self) -> Iter<T> {
+    pub fn iter(&self) -> Iter<'_, T> {
         Iter {
             len: self.len,
             inner: self.items.iter().enumerate(),
@@ -713,9 +696,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::new();
     /// for i in 0..10 {
     ///     arena.insert(i * i);
@@ -725,7 +707,7 @@ impl<T> Arena<T> {
     ///     *value += 5;
     /// }
     /// ```
-    pub fn iter_mut(&mut self) -> IterMut<T> {
+    pub fn iter_mut(&mut self) -> IterMut<'_, T> {
         IterMut {
             len: self.len,
             inner: self.items.iter_mut().enumerate(),
@@ -742,9 +724,8 @@ impl<T> Arena<T> {
     ///
     /// # Examples
     ///
-    /// ```ignore
-    /// use rapier::data::arena::Arena;
-    ///
+    /// ```
+    /// # use rapier3d::data::arena::Arena;
     /// let mut arena = Arena::new();
     /// let idx_1 = arena.insert("hello");
     /// let idx_2 = arena.insert("world");
@@ -757,7 +738,7 @@ impl<T> Arena<T> {
     /// assert!(arena.get(idx_1).is_none());
     /// assert!(arena.get(idx_2).is_none());
     /// ```
-    pub fn drain(&mut self) -> Drain<T> {
+    pub fn drain(&mut self) -> Drain<'_, T> {
         Drain {
             inner: self.items.drain(..).enumerate(),
         }
@@ -810,6 +791,7 @@ impl<T> Arena<T> {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T> IntoIterator for Arena<T> {
     type Item = T;
     type IntoIter = IntoIter<T>;
@@ -829,9 +811,8 @@ impl<T> IntoIterator for Arena<T> {
 ///
 /// # Examples
 ///
-/// ```ignore
-/// use rapier::data::arena::Arena;
-///
+/// ```
+/// # use rapier3d::data::arena::Arena;
 /// let mut arena = Arena::new();
 /// for i in 0..10 {
 ///     arena.insert(i * i);
@@ -841,12 +822,14 @@ impl<T> IntoIterator for Arena<T> {
 ///     assert!(value < 100);
 /// }
 /// ```
+#[cfg(feature = "alloc")]
 #[derive(Clone, Debug)]
 pub struct IntoIter<T> {
     len: usize,
     inner: vec::IntoIter<Entry<T>>,
 }
 
+#[cfg(feature = "alloc")]
 impl<T> Iterator for IntoIter<T> {
     type Item = T;
 
@@ -871,6 +854,7 @@ impl<T> Iterator for IntoIter<T> {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T> DoubleEndedIterator for IntoIter<T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         loop {
@@ -889,14 +873,17 @@ impl<T> DoubleEndedIterator for IntoIter<T> {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T> ExactSizeIterator for IntoIter<T> {
     fn len(&self) -> usize {
         self.len
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T> FusedIterator for IntoIter<T> {}
 
+#[cfg(feature = "alloc")]
 impl<'a, T> IntoIterator for &'a Arena<T> {
     type Item = (Index, &'a T);
     type IntoIter = Iter<'a, T>;
@@ -913,9 +900,8 @@ impl<'a, T> IntoIterator for &'a Arena<T> {
 ///
 /// # Examples
 ///
-/// ```ignore
-/// use rapier::data::arena::Arena;
-///
+/// ```
+/// # use rapier3d::data::arena::Arena;
 /// let mut arena = Arena::new();
 /// for i in 0..10 {
 ///     arena.insert(i * i);
@@ -925,12 +911,14 @@ impl<'a, T> IntoIterator for &'a Arena<T> {
 ///     println!("{} is at index {:?}", value, idx);
 /// }
 /// ```
+#[cfg(feature = "alloc")]
 #[derive(Clone, Debug)]
 pub struct Iter<'a, T: 'a> {
     len: usize,
     inner: iter::Enumerate<slice::Iter<'a, Entry<T>>>,
 }
 
+#[cfg(feature = "alloc")]
 impl<'a, T> Iterator for Iter<'a, T> {
     type Item = (Index, &'a T);
 
@@ -965,7 +953,8 @@ impl<'a, T> Iterator for Iter<'a, T> {
     }
 }
 
-impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
+#[cfg(feature = "alloc")]
+impl<T> DoubleEndedIterator for Iter<'_, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         loop {
             match self.inner.next_back() {
@@ -993,14 +982,17 @@ impl<'a, T> DoubleEndedIterator for Iter<'a, T> {
     }
 }
 
-impl<'a, T> ExactSizeIterator for Iter<'a, T> {
+#[cfg(feature = "alloc")]
+impl<T> ExactSizeIterator for Iter<'_, T> {
     fn len(&self) -> usize {
         self.len
     }
 }
 
-impl<'a, T> FusedIterator for Iter<'a, T> {}
+#[cfg(feature = "alloc")]
+impl<T> FusedIterator for Iter<'_, T> {}
 
+#[cfg(feature = "alloc")]
 impl<'a, T> IntoIterator for &'a mut Arena<T> {
     type Item = (Index, &'a mut T);
     type IntoIter = IterMut<'a, T>;
@@ -1017,9 +1009,8 @@ impl<'a, T> IntoIterator for &'a mut Arena<T> {
 ///
 /// # Examples
 ///
-/// ```ignore
-/// use rapier::data::arena::Arena;
-///
+/// ```
+/// # use rapier3d::data::arena::Arena;
 /// let mut arena = Arena::new();
 /// for i in 0..10 {
 ///     arena.insert(i * i);
@@ -1029,12 +1020,14 @@ impl<'a, T> IntoIterator for &'a mut Arena<T> {
 ///     *value += 5;
 /// }
 /// ```
+#[cfg(feature = "alloc")]
 #[derive(Debug)]
 pub struct IterMut<'a, T: 'a> {
     len: usize,
     inner: iter::Enumerate<slice::IterMut<'a, Entry<T>>>,
 }
 
+#[cfg(feature = "alloc")]
 impl<'a, T> Iterator for IterMut<'a, T> {
     type Item = (Index, &'a mut T);
 
@@ -1069,7 +1062,8 @@ impl<'a, T> Iterator for IterMut<'a, T> {
     }
 }
 
-impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
+#[cfg(feature = "alloc")]
+impl<T> DoubleEndedIterator for IterMut<'_, T> {
     fn next_back(&mut self) -> Option<Self::Item> {
         loop {
             match self.inner.next_back() {
@@ -1097,13 +1091,15 @@ impl<'a, T> DoubleEndedIterator for IterMut<'a, T> {
     }
 }
 
-impl<'a, T> ExactSizeIterator for IterMut<'a, T> {
+#[cfg(feature = "alloc")]
+impl<T> ExactSizeIterator for IterMut<'_, T> {
     fn len(&self) -> usize {
         self.len
     }
 }
 
-impl<'a, T> FusedIterator for IterMut<'a, T> {}
+#[cfg(feature = "alloc")]
+impl<T> FusedIterator for IterMut<'_, T> {}
 
 /// An iterator that removes elements from the arena.
 ///
@@ -1115,9 +1111,8 @@ impl<'a, T> FusedIterator for IterMut<'a, T> {}
 ///
 /// # Examples
 ///
-/// ```ignore
-/// use rapier::data::arena::Arena;
-///
+/// ```
+/// # use rapier3d::data::arena::Arena;
 /// let mut arena = Arena::new();
 /// let idx_1 = arena.insert("hello");
 /// let idx_2 = arena.insert("world");
@@ -1130,12 +1125,14 @@ impl<'a, T> FusedIterator for IterMut<'a, T> {}
 /// assert!(arena.get(idx_1).is_none());
 /// assert!(arena.get(idx_2).is_none());
 /// ```
+#[cfg(feature = "alloc")]
 #[derive(Debug)]
 pub struct Drain<'a, T: 'a> {
     inner: iter::Enumerate<vec::Drain<'a, Entry<T>>>,
 }
 
-impl<'a, T> Iterator for Drain<'a, T> {
+#[cfg(feature = "alloc")]
+impl<T> Iterator for Drain<'_, T> {
     type Item = (Index, T);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -1155,6 +1152,7 @@ impl<'a, T> Iterator for Drain<'a, T> {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T> Extend<T> for Arena<T> {
     fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
         for t in iter {
@@ -1163,6 +1161,7 @@ impl<T> Extend<T> for Arena<T> {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T> FromIterator<T> for Arena<T> {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         let iter = iter.into_iter();
@@ -1175,6 +1174,7 @@ impl<T> FromIterator<T> for Arena<T> {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T> ops::Index<Index> for Arena<T> {
     type Output = T;
 
@@ -1183,6 +1183,7 @@ impl<T> ops::Index<Index> for Arena<T> {
     }
 }
 
+#[cfg(feature = "alloc")]
 impl<T> ops::IndexMut<Index> for Arena<T> {
     fn index_mut(&mut self, index: Index) -> &mut Self::Output {
         self.get_mut(index).expect("No element at index")

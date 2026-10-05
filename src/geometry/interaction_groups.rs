@@ -1,19 +1,56 @@
-/// Pairwise filtering using bit masks.
+#![allow(clippy::bad_bit_mask)] // Clippy will complain about the bitmasks due to Group::NONE being 0.
+
+/// Collision filtering system that controls which colliders can interact with each other.
 ///
-/// This filtering method is based on two 32-bit values:
-/// - The interaction groups memberships.
-/// - The interaction groups filter.
+/// Think of this as "collision layers" in game engines. Each collider has:
+/// - **Memberships**: What groups does this collider belong to? (up to 32 groups)
+/// - **Filter**: What groups can this collider interact with?
 ///
-/// An interaction is allowed between two filters `a` and `b` when two conditions
-/// are met simultaneously:
+/// An interaction is allowed between two colliders `a` and `b` when two conditions
+/// are met simultaneously for [`InteractionTestMode::And`] or individually for [`InteractionTestMode::Or`]::
 /// - The groups membership of `a` has at least one bit set to `1` in common with the groups filter of `b`.
 /// - The groups membership of `b` has at least one bit set to `1` in common with the groups filter of `a`.
 ///
-/// In other words, interactions are allowed between two filter iff. the following condition is met:
+/// In other words, interactions are allowed between two colliders iff. the following condition is met
+/// for [`InteractionTestMode::And`]:
 /// ```ignore
-/// (self.memberships & rhs.filter) != 0 && (rhs.memberships & self.filter) != 0
+/// (self.memberships.bits() & rhs.filter.bits()) != 0 && (rhs.memberships.bits() & self.filter.bits()) != 0
+/// ```
+/// or for [`InteractionTestMode::Or`]:
+/// ```ignore
+/// (self.memberships.bits() & rhs.filter.bits()) != 0 || (rhs.memberships.bits() & self.filter.bits()) != 0
+/// ```
+/// # Common use cases
+///
+/// - **Player vs. Enemy bullets**: Players in group 1, enemies in group 2. Player bullets
+///   only hit group 2, enemy bullets only hit group 1.
+/// - **Trigger zones**: Sensors that only detect specific object types.
+///
+/// # Example
+///
+/// ```ignore
+/// # use rapier3d::geometry::{InteractionGroups, Group};
+/// // Player collider: in group 1, collides with groups 2 and 3
+/// let player_groups = InteractionGroups::new(
+///     Group::GROUP_1,                    // I am in group 1
+///     Group::GROUP_2, | Group::GROUP_3,  // I collide with groups 2 and 3
+///     InteractionTestMode::And
+/// );
+///
+/// // Enemy collider: in group 2, collides with group 1
+/// let enemy_groups = InteractionGroups::new(
+///     Group::GROUP_2,  // I am in group 2
+///     Group::GROUP_1,  // I collide with group 1
+///     InteractionTestMode::And
+/// );
+///
+/// // These will collide because:
+/// // - Player's membership (GROUP_1) is in enemy's filter (GROUP_1) ✓
+/// // - Enemy's membership (GROUP_2) is in player's filter (GROUP_2) ✓
+/// assert!(player_groups.test(enemy_groups));
 /// ```
 #[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "bytemuck", derive(bytemuck::NoUninit))]
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 #[repr(C)]
 pub struct InteractionGroups {
@@ -21,35 +58,65 @@ pub struct InteractionGroups {
     pub memberships: Group,
     /// Groups filter.
     pub filter: Group,
-    /// bitwise set of groups that this collider belongs to for additional filtering within the same belongsToGrouping
+    /// Membership mask used for additional filtering within the same grouping.
     pub belongs_to_with_grouping: u32,
-    /// bitwise set of groups that this collider collides with for additional filtering within the same belongsToGrouping
+    /// Collision mask used for additional filtering within the same grouping.
     pub collides_with_with_grouping: u32,
-    /// the group this collider belongs to
+    /// Identifier of the grouping this collider belongs to.
     pub belongs_to_grouping: u32,
+    /// Interaction test mode
+    ///
+    /// In case of different test modes between two [`InteractionGroups`], [`InteractionTestMode::And`] is given priority.
+    pub test_mode: InteractionTestMode,
+}
+
+#[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
+#[cfg_attr(feature = "bytemuck", derive(bytemuck::NoUninit))]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq, Default)]
+#[repr(u32)]
+/// Specifies which method should be used to test interactions.
+///
+/// In case of different test modes between two [`InteractionGroups`], [`InteractionTestMode::And`] is given priority.
+pub enum InteractionTestMode {
+    /// Use [`InteractionGroups::test_and`].
+    #[default]
+    And = 0,
+    /// Use [`InteractionGroups::test_or`], iff. the `rhs` is also [`InteractionTestMode::Or`].
+    ///
+    /// If the `rhs` is not [`InteractionTestMode::Or`], use [`InteractionGroups::test_and`].
+    Or = 1,
 }
 
 impl InteractionGroups {
     /// Initializes with the given interaction groups and interaction mask.
-    pub const fn new(memberships: Group, filter: Group,
-        belongs_to_with_grouping: u32, collides_with_with_grouping: u32, belongs_to_grouping: u32) -> Self {
+    pub const fn new(memberships: Group, filter: Group, test_mode: InteractionTestMode) -> Self {
         Self {
             memberships,
             filter,
-            belongs_to_with_grouping,
-            collides_with_with_grouping,
-            belongs_to_grouping
+            belongs_to_with_grouping: u32::MAX,
+            collides_with_with_grouping: u32::MAX,
+            belongs_to_grouping: u32::MAX,
+            test_mode,
         }
     }
 
-    /// Allow interaction with everything.
+    /// Creates a filter that allows interactions with everything (default behavior).
+    ///
+    /// The collider is in all groups and collides with all groups.
     pub const fn all() -> Self {
-        Self::new(Group::ALL, Group::ALL, u32::MAX, u32::MAX, u32::MAX)
+        Self::new(Group::ALL, Group::ALL, InteractionTestMode::And)
     }
 
-    /// Prevent all interactions.
+    /// Creates a filter that prevents all interactions.
+    ///
+    /// The collider won't collide with anything. Useful for temporarily disabled colliders.
     pub const fn none() -> Self {
-        Self::new(Group::NONE, Group::NONE, 0, 0, 0)
+        Self {
+            belongs_to_with_grouping: 0,
+            collides_with_with_grouping: 0,
+            belongs_to_grouping: 0,
+            ..Self::new(Group::NONE, Group::NONE, InteractionTestMode::And)
+        }
     }
 
     /// Sets the group this filter is part of.
@@ -67,34 +134,56 @@ impl InteractionGroups {
     /// Check if interactions should be allowed based on the interaction memberships and filter.
     ///
     /// An interaction is allowed iff. the memberships of `self` contain at least one bit set to 1 in common
-    /// with the filter of `rhs`, and vice-versa.
+    /// with the filter of `rhs`, **and** vice-versa.
     #[inline]
-    pub const fn test(self, rhs: Self) -> bool {
-    	// NOTE: since const ops is not stable, we have to convert `Group` into u32
+    pub const fn test_and(self, rhs: Self) -> bool {
+        // NOTE: since const ops is not stable, we have to convert `Group` into u32
         // to use & operator in const context.
         (self.memberships.bits() & rhs.filter.bits()) != 0
             && (rhs.memberships.bits() & self.filter.bits()) != 0
-        // And in different grouping
-        && (self.belongs_to_grouping != rhs.belongs_to_grouping
-            // Or same grouping and grouping flags say yes
-            || (self.belongs_to_grouping == rhs.belongs_to_grouping  
-                && (self.belongs_to_with_grouping & rhs.collides_with_with_grouping) != 0
-                && (rhs.belongs_to_with_grouping & self.collides_with_with_grouping) != 0)
-           )
+    }
+
+    /// Check if interactions should be allowed based on the interaction memberships and filter.
+    ///
+    /// An interaction is allowed iff. the groups of `self` contain at least one bit set to 1 in common
+    /// with the mask of `rhs`, **or** vice-versa.
+    #[inline]
+    pub const fn test_or(self, rhs: Self) -> bool {
+        // NOTE: since const ops is not stable, we have to convert `Group` into u32
+        // to use & operator in const context.
+        (self.memberships.bits() & rhs.filter.bits()) != 0
+            || (rhs.memberships.bits() & self.filter.bits()) != 0
+    }
+
+    /// Check if interactions should be allowed based on the interaction memberships and filter.
+    ///
+    /// See [`InteractionTestMode`] for the standard mask rules. Within the same
+    /// grouping, both additional membership/collision masks must also match.
+    #[inline]
+    pub const fn test(self, rhs: Self) -> bool {
+        let standard_match = match (self.test_mode, rhs.test_mode) {
+            (InteractionTestMode::And, _) => self.test_and(rhs),
+            (InteractionTestMode::Or, InteractionTestMode::And) => self.test_and(rhs),
+            (InteractionTestMode::Or, InteractionTestMode::Or) => self.test_or(rhs),
+        };
+
+        standard_match
+            && (self.belongs_to_grouping != rhs.belongs_to_grouping
+                || ((self.belongs_to_with_grouping & rhs.collides_with_with_grouping) != 0
+                    && (rhs.belongs_to_with_grouping & self.collides_with_with_grouping) != 0))
     }
 }
 
 impl Default for InteractionGroups {
     fn default() -> Self {
-        Self::all()
+        Self::new(Group::GROUP_1, Group::ALL, InteractionTestMode::And)
     }
 }
 
-use bitflags::bitflags;
-
-bitflags! {
+bitflags::bitflags! {
     /// A bit mask identifying groups for interaction.
     #[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
+    #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
     pub struct Group: u32 {
         /// The group n°1.
         const GROUP_1 = 1 << 0;
@@ -171,7 +260,7 @@ bitflags! {
 impl From<u32> for Group {
     #[inline]
     fn from(val: u32) -> Self {
-        unsafe { Self::from_bits_unchecked(val) }
+        Self::from_bits_retain(val)
     }
 }
 
@@ -181,3 +270,9 @@ impl From<Group> for u32 {
         val.bits()
     }
 }
+
+// `Group` is generated by `bitflags!` as `#[repr(transparent)]` around `u32`, so it is
+// trivially safe to treat as `NoUninit`. The `bitflags!` macro doesn't forward derives
+// to bytemuck, so we add a manual unsafe impl.
+#[cfg(feature = "bytemuck")]
+unsafe impl bytemuck::NoUninit for Group {}

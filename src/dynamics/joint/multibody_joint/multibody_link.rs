@@ -1,12 +1,15 @@
-use std::ops::{Deref, DerefMut};
+use crate::alloc_prelude::*;
+use core::ops::{Deref, DerefMut};
 
+#[cfg(doc)]
+use crate::dynamics::Multibody;
 use crate::dynamics::{MultibodyJoint, RigidBodyHandle};
-use crate::math::{Isometry, Real, Vector};
+use crate::math::{Pose, Real, Vector};
 use crate::prelude::RigidBodyVelocity;
 
 /// One link of a multibody.
 #[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
-#[derive(Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct MultibodyLink {
     // FIXME: make all those private.
     pub(crate) internal_id: usize,
@@ -21,13 +24,13 @@ pub struct MultibodyLink {
     /// The multibody joint of this link.
     pub joint: MultibodyJoint,
     // TODO: should this be removed in favor of the rigid-body position?
-    pub(crate) local_to_world: Isometry<Real>,
-    pub(crate) local_to_parent: Isometry<Real>,
-    pub(crate) shift02: Vector<Real>,
-    pub(crate) shift23: Vector<Real>,
+    pub(crate) local_to_world: Pose,
+    pub(crate) local_to_parent: Pose,
+    pub(crate) shift02: Vector,
+    pub(crate) shift23: Vector,
 
     /// The velocity added by the joint, in world-space.
-    pub(crate) joint_velocity: RigidBodyVelocity,
+    pub(crate) joint_velocity: RigidBodyVelocity<Real>,
 }
 
 impl MultibodyLink {
@@ -38,8 +41,8 @@ impl MultibodyLink {
         assembly_id: usize,
         parent_internal_id: usize,
         joint: MultibodyJoint,
-        local_to_world: Isometry<Real>,
-        local_to_parent: Isometry<Real>,
+        local_to_world: Pose,
+        local_to_parent: Pose,
     ) -> Self {
         let joint_velocity = RigidBodyVelocity::zero();
 
@@ -50,8 +53,8 @@ impl MultibodyLink {
             joint,
             local_to_world,
             local_to_parent,
-            shift02: na::zero(),
-            shift23: na::zero(),
+            shift02: Vector::ZERO,
+            shift23: Vector::ZERO,
             joint_velocity,
             rigid_body,
         }
@@ -79,6 +82,18 @@ impl MultibodyLink {
         self.internal_id
     }
 
+    /// The offset of this link's degrees of freedom in the multibody's
+    /// generalized coordinate / velocity vectors.
+    ///
+    /// The link's `ndofs` generalized velocities occupy
+    /// `assembly_id..assembly_id + ndofs` in [`Multibody::generalized_velocity`]
+    /// (and the matching slice of any displacement passed to
+    /// [`Multibody::apply_displacements`]).
+    #[inline]
+    pub fn assembly_id(&self) -> usize {
+        self.assembly_id
+    }
+
     /// The handle of the parent link.
     #[inline]
     pub fn parent_id(&self) -> Option<usize> {
@@ -91,20 +106,20 @@ impl MultibodyLink {
 
     /// The world-space transform of the rigid-body attached to this link.
     #[inline]
-    pub fn local_to_world(&self) -> &Isometry<Real> {
+    pub fn local_to_world(&self) -> &Pose {
         &self.local_to_world
     }
 
     /// The position of the rigid-body attached to this link relative to its parent.
     #[inline]
-    pub fn local_to_parent(&self) -> &Isometry<Real> {
+    pub fn local_to_parent(&self) -> &Pose {
         &self.local_to_parent
     }
 }
 
 // FIXME: keep this even if we already have the Index2 traits?
 #[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct MultibodyLinkVec(pub Vec<MultibodyLink>);
 
 impl MultibodyLinkVec {
@@ -118,11 +133,11 @@ impl MultibodyLinkVec {
         );
         assert!(parent_id < self.len(), "Invalid parent index.");
 
-        unsafe {
-            let rb = &mut *(self.get_unchecked_mut(i) as *mut _);
-            let parent_rb = &*(self.get_unchecked(parent_id) as *const _);
-            (rb, parent_rb)
-        }
+        let [rb, parent_rb] = self
+            .0
+            .get_disjoint_mut([i, parent_id])
+            .expect("indices are in bounds and distinct");
+        (rb, &*parent_rb)
     }
 }
 

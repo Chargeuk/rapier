@@ -1,0 +1,23 @@
+// Stress-test scenes. The registry (group/name) lives in the main file; this
+// module just exposes each scene's `run` entry point.
+pub mod balls2;
+pub mod boxes2;
+pub mod capsules2;
+pub mod convex_polygons2;
+pub mod heightfield2;
+pub mod joint_ball2;
+pub mod joint_fixed2;
+pub mod joint_prismatic2;
+pub mod large_pyramids2;
+pub mod many_pyramids2;
+pub mod pyramid2;
+pub mod ragdolls2;
+pub mod ropes2;
+pub mod soft_blobs2;
+pub mod soft_cloth_keva2;
+pub mod soft_fem_beams2;
+pub mod soft_jellies2;
+pub mod soft_ropes2;
+pub mod soft_slab2;
+pub mod soft_strips2;
+pub mod vertical_stacks2;

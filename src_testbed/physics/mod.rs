@@ -1,108 +1,93 @@
-use crossbeam::channel::Receiver;
-use rapier::dynamics::{
-    CCDSolver, ImpulseJointSet, IntegrationParameters, IslandManager, MultibodyJointSet,
-    RigidBodySet,
-};
-use rapier::geometry::{BroadPhase, ColliderSet, CollisionEvent, ContactForceEvent, NarrowPhase};
-use rapier::math::{Real, Vector};
-use rapier::pipeline::{PhysicsHooks, PhysicsPipeline, QueryPipeline};
+use rapier::geometry::{BroadPhaseBvh, BvhOptimizationStrategy, CollisionEvent, ContactForceEvent};
+use rapier::pipeline::PhysicsWorld;
+use std::sync::mpsc::Receiver;
 
+/// Which broad-phase acceleration structure the testbed builds for a scene.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum RapierBroadPhaseType {
+    #[default]
+    BvhSubtreeOptimizer,
+    BvhWithoutOptimization,
+}
+
+impl RapierBroadPhaseType {
+    pub fn init_broad_phase(self) -> BroadPhaseBvh {
+        match self {
+            RapierBroadPhaseType::BvhSubtreeOptimizer => {
+                BroadPhaseBvh::with_optimization_strategy(BvhOptimizationStrategy::SubtreeOptimizer)
+            }
+            RapierBroadPhaseType::BvhWithoutOptimization => {
+                BroadPhaseBvh::with_optimization_strategy(BvhOptimizationStrategy::None)
+            }
+        }
+    }
+}
+
+/// Snapshots the full simulation state of a [`PhysicsWorld`].
+pub fn snapshot_world(world: &PhysicsWorld, timestep_id: usize) -> PhysicsSnapshot {
+    PhysicsSnapshot::new(timestep_id, world).expect("Failed to create physics snapshot")
+}
+
+/// Restores a [`PhysicsWorld`] from a snapshot produced by [`snapshot_world`],
+/// returning the timestep id the snapshot was taken at.
+pub fn restore_world(world: &mut PhysicsWorld, snapshot: &PhysicsSnapshot) -> usize {
+    let (restored, timestep_id) = snapshot
+        .restore()
+        .expect("Failed to restore physics snapshot");
+    let PhysicsWorld {
+        gravity,
+        integration_parameters,
+        physics_pipeline: _,
+        collision_pipeline: _,
+        islands,
+        broad_phase,
+        narrow_phase,
+        bodies,
+        colliders,
+        impulse_joints,
+        multibody_joints,
+        soft_bodies,
+        ccd_solver: _,
+    } = restored;
+    world.gravity = gravity;
+    world.integration_parameters = integration_parameters;
+    world.islands = islands;
+    world.broad_phase = broad_phase;
+    world.narrow_phase = narrow_phase;
+    world.bodies = bodies;
+    world.colliders = colliders;
+    world.impulse_joints = impulse_joints;
+    world.multibody_joints = multibody_joints;
+    world.soft_bodies = soft_bodies;
+    timestep_id
+}
+
+/// A serialized [`PhysicsWorld`], plus the timestep it was taken at.
+///
+/// The world serializes exactly the state a step reads (see [`PhysicsWorld`]); the
+/// destructuring in [`restore_world`] is deliberate, so a new field there has to be
+/// considered here rather than silently dropped.
+#[derive(Clone)]
 pub struct PhysicsSnapshot {
     timestep_id: usize,
-    broad_phase: Vec<u8>,
-    narrow_phase: Vec<u8>,
-    bodies: Vec<u8>,
-    colliders: Vec<u8>,
-    impulse_joints: Vec<u8>,
+    world: Vec<u8>,
 }
 
 impl PhysicsSnapshot {
-    pub fn new(
-        timestep_id: usize,
-        broad_phase: &BroadPhase,
-        narrow_phase: &NarrowPhase,
-        bodies: &RigidBodySet,
-        colliders: &ColliderSet,
-        impulse_joints: &ImpulseJointSet,
-    ) -> bincode::Result<Self> {
+    pub fn new(timestep_id: usize, world: &PhysicsWorld) -> bincode::Result<Self> {
         Ok(Self {
             timestep_id,
-            broad_phase: bincode::serialize(broad_phase)?,
-            narrow_phase: bincode::serialize(narrow_phase)?,
-            bodies: bincode::serialize(bodies)?,
-            colliders: bincode::serialize(colliders)?,
-            impulse_joints: bincode::serialize(impulse_joints)?,
+            world: bincode::serialize(world)?,
         })
     }
 
-    pub fn restore(
-        &self,
-    ) -> bincode::Result<(
-        usize,
-        BroadPhase,
-        NarrowPhase,
-        RigidBodySet,
-        ColliderSet,
-        ImpulseJointSet,
-    )> {
-        Ok((
-            self.timestep_id,
-            bincode::deserialize(&self.broad_phase)?,
-            bincode::deserialize(&self.narrow_phase)?,
-            bincode::deserialize(&self.bodies)?,
-            bincode::deserialize(&self.colliders)?,
-            bincode::deserialize(&self.impulse_joints)?,
-        ))
+    #[profiling::function]
+    pub fn restore(&self) -> bincode::Result<(PhysicsWorld, usize)> {
+        Ok((bincode::deserialize(&self.world)?, self.timestep_id))
     }
 
     pub fn print_snapshot_len(&self) {
-        let total = self.broad_phase.len()
-            + self.narrow_phase.len()
-            + self.bodies.len()
-            + self.colliders.len()
-            + self.impulse_joints.len();
-        println!("Snapshot length: {}B", total);
-        println!("|_ broad_phase: {}B", self.broad_phase.len());
-        println!("|_ narrow_phase: {}B", self.narrow_phase.len());
-        println!("|_ bodies: {}B", self.bodies.len());
-        println!("|_ colliders: {}B", self.colliders.len());
-        println!("|_ impulse_joints: {}B", self.impulse_joints.len());
-    }
-}
-
-pub struct PhysicsState {
-    pub islands: IslandManager,
-    pub broad_phase: BroadPhase,
-    pub narrow_phase: NarrowPhase,
-    pub bodies: RigidBodySet,
-    pub colliders: ColliderSet,
-    pub impulse_joints: ImpulseJointSet,
-    pub multibody_joints: MultibodyJointSet,
-    pub ccd_solver: CCDSolver,
-    pub pipeline: PhysicsPipeline,
-    pub query_pipeline: QueryPipeline,
-    pub integration_parameters: IntegrationParameters,
-    pub gravity: Vector<Real>,
-    pub hooks: Box<dyn PhysicsHooks>,
-}
-
-impl PhysicsState {
-    pub fn new() -> Self {
-        Self {
-            islands: IslandManager::new(),
-            broad_phase: BroadPhase::new(),
-            narrow_phase: NarrowPhase::new(),
-            bodies: RigidBodySet::new(),
-            colliders: ColliderSet::new(),
-            impulse_joints: ImpulseJointSet::new(),
-            multibody_joints: MultibodyJointSet::new(),
-            ccd_solver: CCDSolver::new(),
-            pipeline: PhysicsPipeline::new(),
-            query_pipeline: QueryPipeline::new(),
-            integration_parameters: IntegrationParameters::default(),
-            gravity: Vector::y() * -9.81,
-            hooks: Box::new(()),
-        }
+        println!("Snapshot length: {}B", self.world.len());
     }
 }
 
@@ -113,7 +98,7 @@ pub struct PhysicsEvents {
 
 impl PhysicsEvents {
     pub fn poll_all(&self) {
-        while let Ok(_) = self.collision_events.try_recv() {}
-        while let Ok(_) = self.contact_force_events.try_recv() {}
+        while self.collision_events.try_recv().is_ok() {}
+        while self.contact_force_events.try_recv().is_ok() {}
     }
 }

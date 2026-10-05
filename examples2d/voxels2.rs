@@ -1,0 +1,112 @@
+use rapier_testbed2d::TestbedViewer;
+use rapier2d::parry::transformation::voxelization::FillMode;
+use rapier2d::prelude::*;
+
+const VOXEL_SIZE: Real = 0.1; // 0.25;
+
+pub async fn run(viewer: &mut TestbedViewer) -> anyhow::Result<()> {
+    /*
+     * Voxel geometry type selection.
+     */
+    // TODO: make the testbed support custom enums (or at least a list of option from strings and
+    //       associated constants).
+    let settings = viewer.example_settings_mut();
+    let falling_objects = settings.get_or_set_string(
+        "Falling objects",
+        3, // Defaults to Mixed.
+        vec![
+            "Ball".to_string(),
+            "Cuboid".to_string(),
+            "Capsule".to_string(),
+            "Mixed".to_string(),
+        ],
+    );
+    let voxel_size_y = settings.get_or_set_f32("Voxel size y", 1.0, 0.5..=2.0);
+    let voxel_size = Vector::new(1.0, voxel_size_y);
+    let test_ccd = settings.get_or_set_bool("Test CCD", false);
+
+    /*
+     * World
+     */
+    let mut world = PhysicsWorld::new();
+
+    /*
+     * Create dynamic objects to fall on voxels.
+     */
+    let nx = 50;
+    for i in 0..nx {
+        for j in 0..10 {
+            let mut rb = RigidBodyBuilder::dynamic().translation(Vector::new(
+                i as f32 * 2.0 - nx as f32 / 2.0,
+                20.0 + j as f32 * 2.0,
+            ));
+            if test_ccd {
+                rb = rb.linvel(Vector::new(0.0, -1000.0)).ccd_enabled(true);
+            }
+            let falling_objects = if falling_objects == 3 {
+                j % 3
+            } else {
+                falling_objects
+            };
+
+            let ball_radius = 0.5;
+            let co = match falling_objects {
+                0 => ColliderBuilder::ball(ball_radius),
+                1 => ColliderBuilder::cuboid(ball_radius, ball_radius),
+                2 => ColliderBuilder::capsule_y(ball_radius, ball_radius),
+                _ => unreachable!(),
+            };
+            let _ = world.insert(rb, co);
+        }
+    }
+
+    /*
+     * Voxelization.
+     */
+    let polyline = vec![
+        Vector::new(0.0, 0.0),
+        Vector::new(0.0, 10.0),
+        Vector::new(7.0, 4.0),
+        Vector::new(14.0, 10.0),
+        Vector::new(14.0, 0.0),
+        Vector::new(13.0, 7.0),
+        Vector::new(7.0, 2.0),
+        Vector::new(1.0, 7.0),
+    ];
+    let indices: Vec<_> = (0..polyline.len() as u32)
+        .map(|i| [i, (i + 1) % polyline.len() as u32])
+        .collect();
+    let shape = SharedShape::voxelized_mesh(&polyline, &indices, 0.2, FillMode::default());
+
+    let _ = world.insert(
+        RigidBodyBuilder::fixed().translation(Vector::new(-20.0, -10.0)),
+        ColliderBuilder::new(shape),
+    );
+
+    /*
+     * A voxel wavy floor.
+     */
+    let voxels: Vec<_> = (0..300)
+        .map(|i| {
+            let y = (i as f32 / 20.0).sin().clamp(-0.5, 0.5) * 20.0;
+            Vector::new((i as f32 - 125.0) * voxel_size.x / 2.0, y * voxel_size.y)
+        })
+        .collect();
+    world.insert_collider(
+        ColliderBuilder::voxels_from_points(voxel_size, &voxels),
+        None,
+    );
+
+    /*
+     * Set up the testbed.
+     */
+    viewer.set_world(&mut world);
+    viewer.look_at(Vec2::new(0.0, 20.0), 17.0);
+
+    while viewer.render_frame(&mut world).await {
+        if viewer.simulating() {
+            world.step();
+        }
+    }
+    Ok(())
+}

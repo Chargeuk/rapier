@@ -1,29 +1,66 @@
 //! Structures related to geometry: colliders, shapes, etc.
 
-pub use self::broad_phase_multi_sap::{BroadPhasePairEvent, ColliderPair};
-
-pub use self::broad_phase_multi_sap::BroadPhase;
-// pub use self::broad_phase_qbvh::BroadPhase;
+#[cfg(feature = "alloc")]
+pub(crate) use self::broad_phase_bvh::DeferredBvhOptimize;
+#[cfg(feature = "alloc")]
+pub use self::broad_phase_bvh::{BroadPhaseBvh, BvhOptimizationStrategy};
+pub use self::broad_phase_pair_event::{BroadPhasePairEvent, ColliderPair};
+#[cfg(feature = "alloc")]
+pub use self::collider::{Collider, ColliderBuilder};
+#[cfg(feature = "alloc")]
 pub use self::collider_components::*;
+pub use self::collider_handle::ColliderHandle;
+#[cfg(feature = "alloc")]
+pub use self::collider_set::{ColliderSet, ModifiedColliders};
+#[cfg(feature = "alloc")]
+pub(crate) use self::contact_pair::ContactRecycleState;
+#[cfg(feature = "alloc")]
+pub(crate) use self::contact_pair::PairEventStatus;
+#[cfg(feature = "alloc")]
+pub(crate) use self::contact_pair::SOLVER_DYNAMIC_COLOR_COUNT;
+#[cfg(feature = "alloc")]
+pub(crate) use self::contact_pair::relative_pose_drift;
+#[cfg(feature = "alloc")]
 pub use self::contact_pair::{
-    ContactData, ContactManifoldData, ContactPair, IntersectionPair, SolverContact, SolverFlags,
+    ContactData, ContactId, ContactManifoldData, ContactPair, IntersectionPair, NEW_CONTACT_BIT,
+    PairContacts, RigidPairContacts, SimdSolverContact, SolverContact, SolverContactGeneric,
+    SolverContacts, SolverFlags, is_bouncy, is_bouncy_simd,
 };
+#[cfg(feature = "alloc")]
 pub use self::interaction_graph::{
     ColliderGraphIndex, InteractionGraph, RigidBodyGraphIndex, TemporaryInteractionIndex,
 };
-pub use self::interaction_groups::{Group, InteractionGroups};
+pub use self::interaction_groups::{Group, InteractionGroups, InteractionTestMode};
+#[cfg(feature = "alloc")]
+pub use self::mesh_converter::{MeshConverter, MeshConverterError};
+#[cfg(feature = "alloc")]
 pub use self::narrow_phase::NarrowPhase;
+#[cfg(feature = "alloc")]
+pub(crate) use self::narrow_phase::soft_contacts;
+#[cfg(feature = "alloc")]
+pub use self::narrow_phase::soft_contacts::{
+    SoftContactImpulse, SoftEdgeCandidate, SoftEdgePass, SoftPairContacts, SoftVertexCandidate,
+    SoftVertexHits, SoftVertexPass, SoftVolumePatch, VolumeBin,
+};
+#[cfg(feature = "alloc")]
+pub use parry::utils::Array2;
 
-pub use self::collider::{Collider, ColliderBuilder};
-pub use self::collider_set::ColliderSet;
+pub use parry::bounding_volume::BoundingVolume;
+#[cfg(feature = "alloc")]
+pub use parry::partitioning::{Bvh, BvhBuildStrategy};
+#[cfg(feature = "alloc")]
+pub use parry::query::{PointQuery, PointQueryWithLocation, RayCast, TrackedContact};
+#[cfg(feature = "alloc")]
+pub use parry::shape::{SharedShape, VoxelState, VoxelType, Voxels};
 
-pub use parry::query::TrackedContact;
-
+#[cfg(feature = "alloc")]
 use crate::math::{Real, Vector};
 
 /// A contact between two colliders.
+#[cfg(feature = "alloc")]
 pub type Contact = parry::query::TrackedContact<ContactData>;
 /// A contact manifold between two colliders.
+#[cfg(feature = "alloc")]
 pub type ContactManifold = parry::query::ContactManifold<ContactManifoldData, ContactData>;
 /// A segment shape.
 pub type Segment = parry::shape::Segment;
@@ -36,6 +73,7 @@ pub type Ball = parry::shape::Ball;
 /// A capsule shape.
 pub type Capsule = parry::shape::Capsule;
 /// A heightfield shape.
+#[cfg(feature = "alloc")]
 pub type HeightField = parry::shape::HeightField;
 /// A cylindrical shape.
 #[cfg(feature = "dim3")]
@@ -49,15 +87,18 @@ pub type Aabb = parry::bounding_volume::Aabb;
 pub type Ray = parry::query::Ray;
 /// The intersection between a ray and a  collider.
 pub type RayIntersection = parry::query::RayIntersection;
-/// The the projection of a point on a collider.
+/// The projection of a point on a collider.
 pub type PointProjection = parry::query::PointProjection;
-/// The the time of impact between two shapes.
-pub type TOI = parry::query::TOI;
-pub use parry::shape::SharedShape;
+/// The result of a shape-cast between two shapes.
+pub type ShapeCastHit = parry::query::ShapeCastHit;
+/// The default broad-phase implementation recommended for general-purpose usage.
+#[cfg(feature = "alloc")]
+pub type DefaultBroadPhase = BroadPhaseBvh;
 
 bitflags::bitflags! {
     /// Flags providing more information regarding a collision event.
     #[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
+    #[derive(Copy, Clone, PartialEq, Eq, Debug, Hash)]
     pub struct CollisionEventFlags: u32 {
         /// Flag set if at least one of the colliders involved in the
         /// collision was a sensor when the event was fired.
@@ -70,33 +111,61 @@ bitflags::bitflags! {
 
 #[cfg_attr(feature = "serde-serialize", derive(Serialize, Deserialize))]
 #[derive(Copy, Clone, Hash, Debug)]
-/// Events occurring when two colliders start or stop colliding
+/// Events triggered when two colliders start or stop touching.
+///
+/// Receive these through an [`EventHandler`](crate::pipeline::EventHandler) implementation.
+/// At least one collider must have [`ActiveEvents::COLLISION_EVENTS`](crate::pipeline::ActiveEvents::COLLISION_EVENTS) enabled.
+///
+/// Use for:
+/// - Trigger zones (player entered/exited area)
+/// - Collectible items (player touched coin)
+/// - Sound effects (objects started colliding)
+/// - Game logic based on contact state
+///
+/// # Example
+/// ```
+/// # use rapier3d::prelude::*;
+/// # let h1 = ColliderHandle::from_raw_parts(0, 0);
+/// # let h2 = ColliderHandle::from_raw_parts(1, 0);
+/// # let event = CollisionEvent::Started(h1, h2, CollisionEventFlags::empty());
+/// match event {
+///     CollisionEvent::Started(h1, h2, flags) => {
+///         println!("Colliders {:?} and {:?} started touching", h1, h2);
+///         if flags.contains(CollisionEventFlags::SENSOR) {
+///             println!("At least one is a sensor!");
+///         }
+///     }
+///     CollisionEvent::Stopped(h1, h2, _) => {
+///         println!("Colliders {:?} and {:?} stopped touching", h1, h2);
+///     }
+/// }
+/// ```
 pub enum CollisionEvent {
-    /// Event occurring when two colliders start colliding
+    /// Two colliders just started touching this frame.
     Started(ColliderHandle, ColliderHandle, CollisionEventFlags),
-    /// Event occurring when two colliders stop colliding.
+    /// Two colliders just stopped touching this frame.
     Stopped(ColliderHandle, ColliderHandle, CollisionEventFlags),
 }
 
 impl CollisionEvent {
-    /// Is this a `Started` collision event?
+    /// Returns `true` if this is a Started event (colliders began touching).
     pub fn started(self) -> bool {
         matches!(self, CollisionEvent::Started(..))
     }
 
-    /// Is this a `Stopped` collision event?
+    /// Returns `true` if this is a Stopped event (colliders stopped touching).
     pub fn stopped(self) -> bool {
         matches!(self, CollisionEvent::Stopped(..))
     }
 
-    /// The handle of the first collider involved in this collision event.
+    /// Returns the handle of the first collider in this collision.
     pub fn collider1(self) -> ColliderHandle {
         match self {
             Self::Started(h, _, _) | Self::Stopped(h, _, _) => h,
         }
     }
 
-    /// The handle of the second collider involved in this collision event.
+    /// Returns the handle of the second collider in this collision.
     pub fn collider2(self) -> ColliderHandle {
         match self {
             Self::Started(_, h, _) | Self::Stopped(_, h, _) => h,
@@ -122,6 +191,7 @@ impl CollisionEvent {
     }
 }
 
+#[cfg(feature = "alloc")]
 #[derive(Copy, Clone, PartialEq, Debug, Default)]
 /// Event occurring when the sum of the magnitudes of the contact forces
 /// between two colliders exceed a threshold.
@@ -131,7 +201,7 @@ pub struct ContactForceEvent {
     /// The second collider involved in the contact.
     pub collider2: ColliderHandle,
     /// The sum of all the forces between the two colliders.
-    pub total_force: Vector<Real>,
+    pub total_force: Vector,
     /// The sum of the magnitudes of each force between the two colliders.
     ///
     /// Note that this is **not** the same as the magnitude of `self.total_force`.
@@ -139,11 +209,22 @@ pub struct ContactForceEvent {
     /// the magnitude of their sum.
     pub total_force_magnitude: Real,
     /// The world-space (unit) direction of the force with strongest magnitude.
-    pub max_force_direction: Vector<Real>,
+    pub max_force_direction: Vector,
     /// The magnitude of the largest force at a contact point of this contact pair.
     pub max_force_magnitude: Real,
+    /// Is this the first step the pair's total force exceeded its threshold?
+    ///
+    /// `true` on the step the force crosses the pair's
+    /// [`Collider::contact_force_event_threshold`] coming from below (or from not
+    /// touching), `false` while it stays above on consecutive steps. The status resets
+    /// when the force drops back below the threshold or the colliders separate, so the
+    /// next crossing reports `true` again. Note that this is about the *force*
+    /// threshold, not contact newness: a pair can touch gently for many steps (emitting
+    /// no force event) before its first `started` event.
+    pub started: bool,
 }
 
+#[cfg(feature = "alloc")]
 impl ContactForceEvent {
     /// Init a contact force event from a contact pair.
     pub fn from_contact_pair(dt: Real, pair: &ContactPair, total_force_magnitude: Real) -> Self {
@@ -151,10 +232,15 @@ impl ContactForceEvent {
             collider1: pair.collider1,
             collider2: pair.collider2,
             total_force_magnitude,
+            // The pair's status is updated only after the event handlers ran, so at
+            // this point it still holds the previous step's value.
+            started: !pair
+                .event_status
+                .contains(PairEventStatus::INITIAL_FORCE_THRESHOLD_EVENT_EMITTED),
             ..ContactForceEvent::default()
         };
 
-        for m in &pair.manifolds {
+        for m in pair.solver_manifolds() {
             let mut total_manifold_impulse = 0.0;
             for pt in m.contacts() {
                 total_manifold_impulse += pt.data.impulse;
@@ -166,6 +252,16 @@ impl ContactForceEvent {
             }
 
             result.total_force += m.data.normal * total_manifold_impulse;
+        }
+        // Two soft surfaces: their contacts are candidates, each reporting its impulse.
+        if let Some(soft) = pair.soft() {
+            for i in soft.impulses(pair.collider1) {
+                if i.impulse > result.max_force_magnitude {
+                    result.max_force_magnitude = i.impulse;
+                    result.max_force_direction = i.normal;
+                }
+                result.total_force += i.normal * i.impulse;
+            }
         }
 
         let inv_dt = crate::utils::inv(dt);
@@ -179,29 +275,40 @@ impl ContactForceEvent {
     }
 }
 
-pub(crate) use self::broad_phase_multi_sap::SAPProxyIndex;
+#[cfg(feature = "alloc")]
 pub(crate) use self::narrow_phase::ContactManifoldIndex;
-pub(crate) use parry::partitioning::Qbvh;
+#[cfg(feature = "alloc")]
 pub use parry::shape::*;
 
-#[cfg(feature = "serde-serialize")]
-pub(crate) fn default_persistent_query_dispatcher(
-) -> std::sync::Arc<dyn parry::query::PersistentQueryDispatcher<ContactManifoldData, ContactData>> {
-    std::sync::Arc::new(parry::query::DefaultQueryDispatcher)
+#[cfg(all(feature = "serde-serialize", feature = "alloc"))]
+pub(crate) fn default_persistent_query_dispatcher()
+-> alloc::sync::Arc<dyn parry::query::PersistentQueryDispatcher<ContactManifoldData, ContactData>> {
+    alloc::sync::Arc::new(parry::query::DefaultQueryDispatcher)
 }
 
-#[cfg(feature = "serde-serialize")]
-pub(crate) fn default_query_dispatcher() -> std::sync::Arc<dyn parry::query::QueryDispatcher> {
-    std::sync::Arc::new(parry::query::DefaultQueryDispatcher)
-}
-
-mod broad_phase_multi_sap;
+#[cfg(feature = "alloc")]
 mod collider_components;
-mod contact_pair;
+mod collider_handle;
+#[cfg(feature = "alloc")]
+pub(crate) mod contact_pair;
+#[cfg(feature = "alloc")]
 mod interaction_graph;
 mod interaction_groups;
+#[cfg(feature = "alloc")]
 mod narrow_phase;
 
-mod broad_phase_qbvh;
+#[cfg(feature = "alloc")]
+mod broad_phase_bvh;
+mod broad_phase_pair_event;
+#[cfg(feature = "alloc")]
 mod collider;
+#[cfg(feature = "alloc")]
 mod collider_set;
+#[cfg(feature = "alloc")]
+mod mesh_converter;
+
+#[cfg(all(feature = "dim3", feature = "alloc"))]
+mod manifold_reduction;
+
+#[cfg(all(feature = "dim3", feature = "alloc"))]
+mod contact_clustering;
