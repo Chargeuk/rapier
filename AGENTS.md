@@ -18,6 +18,12 @@ Current `src/geometry/interaction_groups.rs` contains `belongs_to_with_grouping`
 
 Existing documentation includes `README.md`, `ARCHITECTURE.md`, `CONTRIBUTING.md` and `CHANGELOG.md`. Current build command evidence is in `.github/workflows/rapier-ci-build.yml` (including formatting check, Cargo builds/tests and explicit WASM-target builds). Discover applicable commands from the checked-out manifests and CI at implementation time. After merge, inspect the TypeScript binding documentation, manifests and scripts before relying on them. Toolchain and installed-tool versions must be checked when needed; this file does not assert their availability. Do not run the cited commands merely because they are documented here.
 
+### CodeInfo2 container toolchain
+
+The new CodeInfo2 Docker image installs Rust/Cargo in `/opt/cargo/bin`, wasm-pack and wasm-bindgen in `/opt/wasm-tools/bin`, and wasm-opt in `/opt/binaryen/bin`, with image environment `RUSTUP_HOME=/opt/rustup` and `CARGO_HOME=/opt/cargo`. In this container, `exec_command`'s default login shell resets `PATH`, removing these image tool paths and causing command-not-found errors even when the binaries are installed. Use `exec_command` with `login: false` for builds and tool checks to preserve the container PATH. If a runner cannot preserve it, prefix the command only with `PATH="/opt/cargo/bin:/opt/wasm-tools/bin:/opt/binaryen/bin:$PATH"`.
+
+Verify actual tool paths before concluding dependencies are missing. Do not reinstall tools or prepend old HOME `.local/bin` or `.cargo/bin` paths as a workaround. The current checkout's native build, 3D WASM/package build and package smoke checks succeeded using the image dependencies without extra libraries or persistent PATH changes; this evidence applies to the verified CodeInfo2 container environment.
+
 ## Research and repository tools
 
 For repository research, use `code_info` first with explicit repository paths. Reuse returned conversation IDs for follow-up questions within each working session, then inspect cited source directly with bounded reads. If `code_info` is unavailable or a repository is not indexed, use `rg`, `rg --files`, `git` and bounded read-only `sed` reads, report the limitation, and do not install tools or trigger reindexing automatically. Exact requested file reads, applicable `AGENTS.md` files, plans and status checks are reasonable exceptions.
