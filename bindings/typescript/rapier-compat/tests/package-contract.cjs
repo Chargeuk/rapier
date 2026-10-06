@@ -36,7 +36,7 @@ async function main() {
         ),
     );
     assert.equal(pack.name, "@chargeuk/rapier3d-compat");
-    assert.equal(pack.version, "0.21.0-chargeuk.1");
+    assert.equal(pack.version, "0.21.0-chargeuk.2");
     assert.equal(pack.integrity, dry.integrity);
     for (const file of [
         "package.json",
@@ -48,6 +48,12 @@ async function main() {
         "dist/raw.d.ts",
         "dist/rapier_wasm3d.d.ts",
         "dist/rapier_wasm3d_bg.wasm",
+        "web/rapier.mjs",
+        "web/rapier.d.ts",
+        "web/init.d.ts",
+        "web/raw.d.ts",
+        "web/rapier_wasm3d.d.ts",
+        "web/rapier_wasm3d_bg.wasm",
     ]) {
         assert(
             pack.files.some((entry) => entry.path === file),
@@ -87,10 +93,33 @@ async function main() {
         require: "./dist/rapier.cjs",
         import: "./dist/rapier.mjs",
     });
+    assert.deepEqual(manifest.exports["./web"], {
+        types: "./web/rapier.d.ts",
+        import: "./web/rapier.mjs",
+        default: "./web/rapier.mjs",
+    });
+    for (const key of [
+        "dependencies",
+        "optionalDependencies",
+        "peerDependencies",
+    ]) {
+        assert.equal(
+            Object.keys(manifest[key] || {}).length,
+            0,
+            "package must be self-contained",
+        );
+    }
+    const webDeclarations = fs.readFileSync(
+        path.join(installed, "web/rapier_wasm3d.d.ts"),
+        "utf8",
+    );
+    assert.doesNotMatch(webDeclarations, /\[Symbol\.dispose\]/);
     // Node resolves the actual packed exports from an isolated consumer.
     const requireConsumer = createRequire(path.join(artifacts, "consumer.cjs"));
     const cjs = requireConsumer("@chargeuk/rapier3d-compat");
-    await cjs.init();
+    const cjsInitialization = cjs.init();
+    assert.equal(cjs.init(), cjsInitialization);
+    await cjsInitialization;
     assert.equal(cjs.version(), "0.21.0"); // Internal binding version is unchanged.
     for (const name of [
         "World",
@@ -116,8 +145,20 @@ async function main() {
         `
         import assert from 'node:assert/strict';
         import * as R from '@chargeuk/rapier3d-compat';
-        await R.init();
+        import Web from '@chargeuk/rapier3d-compat/web';
+        import {readFileSync} from 'node:fs';
+        import {createRequire} from 'node:module';
+        import {pathToFileURL} from 'node:url';
+        const first = R.init();
+        assert.equal(R.init(), first);
+        await first;
         assert.equal(R.version(), '0.21.0');
+        const webPath = createRequire(import.meta.url).resolve('@chargeuk/rapier3d-compat/web');
+        await Web.init(readFileSync(new URL('./rapier_wasm3d_bg.wasm', pathToFileURL(webPath))));
+        assert.equal(Web.version(), R.version());
+        const webModule = await import('@chargeuk/rapier3d-compat/web');
+        assert.equal(Web.World, webModule.World);
+        assert.deepEqual(Object.keys(Web).sort(), Object.keys(R.default).sort());
         const world = new R.World({x: 0, y: 0, z: 0});
         try {
             const collider = world.createCollider(R.ColliderDesc.ball(1).setBelongsToGrouping(7));
@@ -127,9 +168,15 @@ async function main() {
     `,
     );
     run(process.execPath, [path.join(artifacts, "consumer.mjs")]);
+    run(process.execPath, [
+        path.join(__dirname, "web-package-loading.cjs"),
+        installed,
+    ]);
     const fixture = path.join(artifacts, "consumer.ts");
     fs.copyFileSync(path.join(__dirname, "package-types.ts"), fixture);
-    const program = ts.createProgram([fixture], {
+    const webFixture = path.join(artifacts, "consumer-web.ts");
+    fs.copyFileSync(path.join(__dirname, "package-web-types.ts"), webFixture);
+    const program = ts.createProgram([fixture, webFixture], {
         noEmit: true,
         strict: true,
         target: ts.ScriptTarget.ES2020,
@@ -159,7 +206,14 @@ async function main() {
             wasmBytes: fs.statSync(
                 path.join(installed, "dist/rapier_wasm3d_bg.wasm"),
             ).size,
-            checks: ["pack-dry-run", "tarball", "CJS", "ESM", "TypeScript"],
+            checks: [
+                "pack-dry-run",
+                "tarball",
+                "CJS",
+                "ESM",
+                "web-loading",
+                "TypeScript-root-and-web",
+            ],
             artifacts,
         }),
     );

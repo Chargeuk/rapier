@@ -931,6 +931,36 @@ impl RawColliderSet {
         })
     }
 
+    pub fn coCollisionMemberships(&self, handle: FlatHandle) -> u32 {
+        self.map(handle, |co| co.collision_groups().memberships.bits())
+    }
+
+    pub fn coCollisionFilter(&self, handle: FlatHandle) -> u32 {
+        self.map(handle, |co| co.collision_groups().filter.bits())
+    }
+
+    pub fn coSolverMemberships(&self, handle: FlatHandle) -> u32 {
+        self.map(handle, |co| co.solver_groups().memberships.bits())
+    }
+
+    pub fn coSolverFilter(&self, handle: FlatHandle) -> u32 {
+        self.map(handle, |co| co.solver_groups().filter.bits())
+    }
+
+    pub fn coBelongsToWithGrouping(&self, handle: FlatHandle) -> u32 {
+        self.map(handle, |co| co.collision_groups().belongs_to_with_grouping)
+    }
+
+    pub fn coCollidesWithWithGrouping(&self, handle: FlatHandle) -> u32 {
+        self.map(handle, |co| {
+            co.collision_groups().collides_with_with_grouping
+        })
+    }
+
+    pub fn coBelongsToGrouping(&self, handle: FlatHandle) -> u32 {
+        self.map(handle, |co| co.collision_groups().belongs_to_grouping)
+    }
+
     /// The physics hooks enabled for this collider.
     pub fn coActiveHooks(&self, handle: FlatHandle) -> u32 {
         self.map(handle, |co| co.active_hooks().bits())
@@ -1189,6 +1219,35 @@ impl RawColliderSet {
     pub fn coSetSolverGroups(&mut self, handle: FlatHandle, groups: u32) {
         let groups = super::unpack_interaction_groups(groups);
         self.map_mut(handle, |co| co.set_solver_groups(groups))
+    }
+
+    pub fn coSetCollisionGroups32(&mut self, handle: FlatHandle, memberships: u32, filter: u32) {
+        let groups = super::unpack_interaction_groups32(memberships, filter);
+        self.map_mut(handle, |co| co.set_collision_groups(groups))
+    }
+
+    pub fn coSetSolverGroups32(&mut self, handle: FlatHandle, memberships: u32, filter: u32) {
+        let groups = super::unpack_interaction_groups32(memberships, filter);
+        self.map_mut(handle, |co| co.set_solver_groups(groups))
+    }
+
+    pub fn coSetDetailedCollisionGroups32(
+        &mut self,
+        handle: FlatHandle,
+        memberships: u32,
+        filter: u32,
+        belongs_to_with_grouping: u32,
+        collides_with_with_grouping: u32,
+        belongs_to_grouping: u32,
+    ) {
+        let groups = super::unpack_detailed_interaction_groups32(
+            memberships,
+            filter,
+            belongs_to_with_grouping,
+            collides_with_with_grouping,
+            belongs_to_grouping,
+        );
+        self.map_mut(handle, |co| co.set_collision_groups(groups))
     }
 
     pub fn coSetDetailedCollisionGroups(

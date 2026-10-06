@@ -4,7 +4,8 @@ import {
     BroadPhase,
     Collider,
     ColliderSet,
-    InteractionGroups,
+    QueryInteractionGroups,
+    intoRawQueryGroups,
     NarrowPhase,
     Shape,
 } from "../geometry";
@@ -309,10 +310,11 @@ export class KinematicCharacterController {
         collider: Collider,
         desiredTranslationDelta: Vector,
         filterFlags?: QueryFilterFlags,
-        filterGroups?: InteractionGroups,
+        filterGroups?: QueryInteractionGroups,
         filterPredicate?: (collider: Collider) => boolean,
     ) {
         let rawTranslationDelta = VectorOps.intoRaw(desiredTranslationDelta);
+        const rawGroups = intoRawQueryGroups(filterGroups);
         this.raw.computeColliderMovement(
             this.params.dt,
             this.broadPhase.raw,
@@ -324,8 +326,10 @@ export class KinematicCharacterController {
             this._applyImpulsesToDynamicBodies,
             this._characterMass,
             filterFlags,
-            filterGroups,
+            rawGroups[0],
             this.colliders.castClosure(filterPredicate),
+            rawGroups[1],
+            rawGroups[2],
         );
         rawTranslationDelta.free();
     }

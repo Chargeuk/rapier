@@ -2,7 +2,7 @@ import {RawBroadPhase, RawRayColliderIntersection} from "../raw";
 import {RigidBodyHandle, RigidBodySet} from "../dynamics";
 import {ColliderSet} from "./collider_set";
 import {Ray, RayColliderHit, RayColliderIntersection} from "./ray";
-import {InteractionGroups} from "./interaction_groups";
+import {QueryInteractionGroups, intoRawQueryGroups} from "./interaction_groups";
 import {ColliderHandle} from "./collider";
 import {Rotation, RotationOps, Vector, VectorOps, scratchBuffer} from "../math";
 import {Shape} from "./shape";
@@ -55,11 +55,12 @@ export class BroadPhase {
         maxToi: number,
         solid: boolean,
         filterFlags?: QueryFilterFlags,
-        filterGroups?: InteractionGroups,
+        filterGroups?: QueryInteractionGroups,
         filterExcludeCollider?: ColliderHandle,
         filterExcludeRigidBody?: RigidBodyHandle,
         filterPredicate?: (collider: ColliderHandle) => boolean,
     ): RayColliderHit | null {
+        const rawGroups = intoRawQueryGroups(filterGroups);
         let rawOrig = VectorOps.intoRaw(ray.origin);
         let rawDir = VectorOps.intoRaw(ray.dir);
         let result = RayColliderHit.fromRaw(
@@ -73,10 +74,12 @@ export class BroadPhase {
                 maxToi,
                 solid,
                 filterFlags,
-                filterGroups,
+                rawGroups[0],
                 filterExcludeCollider,
                 filterExcludeRigidBody,
                 filterPredicate,
+                rawGroups[1],
+                rawGroups[2],
             ),
         );
 
@@ -107,12 +110,13 @@ export class BroadPhase {
         maxToi: number,
         solid: boolean,
         filterFlags?: QueryFilterFlags,
-        filterGroups?: InteractionGroups,
+        filterGroups?: QueryInteractionGroups,
         filterExcludeCollider?: ColliderHandle,
         filterExcludeRigidBody?: RigidBodyHandle,
         filterPredicate?: (collider: ColliderHandle) => boolean,
         target?: RayColliderIntersection,
     ): RayColliderIntersection | null {
+        const rawGroups = intoRawQueryGroups(filterGroups);
         let rawOrig = VectorOps.intoRaw(ray.origin);
         let rawDir = VectorOps.intoRaw(ray.dir);
         let result = RayColliderIntersection.fromBuffer(
@@ -126,10 +130,12 @@ export class BroadPhase {
                 maxToi,
                 solid,
                 filterFlags,
-                filterGroups,
+                rawGroups[0],
                 filterExcludeCollider,
                 filterExcludeRigidBody,
                 filterPredicate,
+                rawGroups[1],
+                rawGroups[2],
             ),
             target,
         );
@@ -163,11 +169,12 @@ export class BroadPhase {
         solid: boolean,
         callback: (intersect: RayColliderIntersection) => boolean,
         filterFlags?: QueryFilterFlags,
-        filterGroups?: InteractionGroups,
+        filterGroups?: QueryInteractionGroups,
         filterExcludeCollider?: ColliderHandle,
         filterExcludeRigidBody?: RigidBodyHandle,
         filterPredicate?: (collider: ColliderHandle) => boolean,
     ) {
+        const rawGroups = intoRawQueryGroups(filterGroups);
         let rawOrig = VectorOps.intoRaw(ray.origin);
         let rawDir = VectorOps.intoRaw(ray.dir);
         let rawCallback = (rawInter: RawRayColliderIntersection) => {
@@ -186,10 +193,12 @@ export class BroadPhase {
             solid,
             rawCallback,
             filterFlags,
-            filterGroups,
+            rawGroups[0],
             filterExcludeCollider,
             filterExcludeRigidBody,
             filterPredicate,
+            rawGroups[1],
+            rawGroups[2],
         );
 
         rawOrig.free();
@@ -214,11 +223,12 @@ export class BroadPhase {
         shapeRot: Rotation,
         shape: Shape,
         filterFlags?: QueryFilterFlags,
-        filterGroups?: InteractionGroups,
+        filterGroups?: QueryInteractionGroups,
         filterExcludeCollider?: ColliderHandle,
         filterExcludeRigidBody?: RigidBodyHandle,
         filterPredicate?: (collider: ColliderHandle) => boolean,
     ): ColliderHandle | null {
+        const rawGroups = intoRawQueryGroups(filterGroups);
         let rawPos = VectorOps.intoRaw(shapePos);
         let rawRot = RotationOps.intoRaw(shapeRot);
         let rawShape = shape.intoRaw();
@@ -230,10 +240,12 @@ export class BroadPhase {
             rawRot,
             rawShape,
             filterFlags,
-            filterGroups,
+            rawGroups[0],
             filterExcludeCollider,
             filterExcludeRigidBody,
             filterPredicate,
+            rawGroups[1],
+            rawGroups[2],
         );
 
         rawPos.free();
@@ -263,12 +275,13 @@ export class BroadPhase {
         point: Vector,
         solid: boolean,
         filterFlags?: QueryFilterFlags,
-        filterGroups?: InteractionGroups,
+        filterGroups?: QueryInteractionGroups,
         filterExcludeCollider?: ColliderHandle,
         filterExcludeRigidBody?: RigidBodyHandle,
         filterPredicate?: (collider: ColliderHandle) => boolean,
         target?: PointColliderProjection,
     ): PointColliderProjection | null {
+        const rawGroups = intoRawQueryGroups(filterGroups);
         let rawPoint = VectorOps.intoRaw(point);
         let result = PointColliderProjection.fromBuffer(
             colliders,
@@ -279,10 +292,12 @@ export class BroadPhase {
                 rawPoint,
                 solid,
                 filterFlags,
-                filterGroups,
+                rawGroups[0],
                 filterExcludeCollider,
                 filterExcludeRigidBody,
                 filterPredicate,
+                rawGroups[1],
+                rawGroups[2],
             ),
             target,
         );
@@ -306,12 +321,13 @@ export class BroadPhase {
         colliders: ColliderSet,
         point: Vector,
         filterFlags?: QueryFilterFlags,
-        filterGroups?: InteractionGroups,
+        filterGroups?: QueryInteractionGroups,
         filterExcludeCollider?: ColliderHandle,
         filterExcludeRigidBody?: RigidBodyHandle,
         filterPredicate?: (collider: ColliderHandle) => boolean,
         target?: PointColliderProjection,
     ): PointColliderProjection | null {
+        const rawGroups = intoRawQueryGroups(filterGroups);
         let rawPoint = VectorOps.intoRaw(point);
         let result = PointColliderProjection.fromBuffer(
             colliders,
@@ -321,10 +337,12 @@ export class BroadPhase {
                 colliders.raw,
                 rawPoint,
                 filterFlags,
-                filterGroups,
+                rawGroups[0],
                 filterExcludeCollider,
                 filterExcludeRigidBody,
                 filterPredicate,
+                rawGroups[1],
+                rawGroups[2],
             ),
             target,
         );
@@ -351,11 +369,12 @@ export class BroadPhase {
         point: Vector,
         callback: (handle: ColliderHandle) => boolean,
         filterFlags?: QueryFilterFlags,
-        filterGroups?: InteractionGroups,
+        filterGroups?: QueryInteractionGroups,
         filterExcludeCollider?: ColliderHandle,
         filterExcludeRigidBody?: RigidBodyHandle,
         filterPredicate?: (collider: ColliderHandle) => boolean,
     ) {
+        const rawGroups = intoRawQueryGroups(filterGroups);
         let rawPoint = VectorOps.intoRaw(point);
 
         this.raw.intersectionsWithPoint(
@@ -365,10 +384,12 @@ export class BroadPhase {
             rawPoint,
             callback,
             filterFlags,
-            filterGroups,
+            rawGroups[0],
             filterExcludeCollider,
             filterExcludeRigidBody,
             filterPredicate,
+            rawGroups[1],
+            rawGroups[2],
         );
 
         rawPoint.free();
@@ -412,12 +433,13 @@ export class BroadPhase {
         maxToi: number,
         stopAtPenetration: boolean,
         filterFlags?: QueryFilterFlags,
-        filterGroups?: InteractionGroups,
+        filterGroups?: QueryInteractionGroups,
         filterExcludeCollider?: ColliderHandle,
         filterExcludeRigidBody?: RigidBodyHandle,
         filterPredicate?: (collider: ColliderHandle) => boolean,
         target?: ColliderShapeCastHit,
     ): ColliderShapeCastHit | null {
+        const rawGroups = intoRawQueryGroups(filterGroups);
         let rawPos = VectorOps.intoRaw(shapePos);
         let rawRot = RotationOps.intoRaw(shapeRot);
         let rawVel = VectorOps.intoRaw(shapeVel);
@@ -435,10 +457,12 @@ export class BroadPhase {
             maxToi,
             stopAtPenetration,
             filterFlags,
-            filterGroups,
+            rawGroups[0],
             filterExcludeCollider,
             filterExcludeRigidBody,
             filterPredicate,
+            rawGroups[1],
+            rawGroups[2],
         );
 
         let result = null;
@@ -482,11 +506,12 @@ export class BroadPhase {
         shape: Shape,
         callback: (handle: ColliderHandle) => boolean,
         filterFlags?: QueryFilterFlags,
-        filterGroups?: InteractionGroups,
+        filterGroups?: QueryInteractionGroups,
         filterExcludeCollider?: ColliderHandle,
         filterExcludeRigidBody?: RigidBodyHandle,
         filterPredicate?: (collider: ColliderHandle) => boolean,
     ) {
+        const rawGroups = intoRawQueryGroups(filterGroups);
         let rawPos = VectorOps.intoRaw(shapePos);
         let rawRot = RotationOps.intoRaw(shapeRot);
         let rawShape = shape.intoRaw();
@@ -500,10 +525,12 @@ export class BroadPhase {
             rawShape,
             callback,
             filterFlags,
-            filterGroups,
+            rawGroups[0],
             filterExcludeCollider,
             filterExcludeRigidBody,
             filterPredicate,
+            rawGroups[1],
+            rawGroups[2],
         );
 
         rawPos.free();

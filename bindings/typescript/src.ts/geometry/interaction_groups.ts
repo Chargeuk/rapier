@@ -16,3 +16,21 @@
  * ```
  */
 export type InteractionGroups = number;
+
+/** Separate unsigned 32-bit masks; never pack these into a JavaScript number. */
+export interface InteractionGroups32 {
+    memberships: number;
+    filter: number;
+}
+
+/** Queries accept the legacy packed value or explicit full-width masks. */
+export type QueryInteractionGroups = InteractionGroups | InteractionGroups32;
+
+/** @internal Translate query masks without truncating either full-width side. */
+export function intoRawQueryGroups(
+    groups?: QueryInteractionGroups,
+): [number | undefined, number | undefined, number | undefined] {
+    if (typeof groups === "number") return [groups, undefined, undefined];
+    if (groups == null) return [undefined, undefined, undefined];
+    return [undefined, groups.memberships >>> 0, groups.filter >>> 0];
+}

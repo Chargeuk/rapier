@@ -211,3 +211,251 @@ fn hooks_remain_opt_in_and_custom_filters_cannot_be_bypassed() {
         assert!(hooks.0.load(Ordering::Relaxed) > count);
     }
 }
+
+fn full_groups(memberships: u32, filter: u32) -> InteractionGroups {
+    InteractionGroups::new(
+        Group::from_bits_retain(memberships),
+        Group::from_bits_retain(filter),
+        InteractionTestMode::And,
+    )
+}
+
+#[test]
+fn high_standard_masks_preserve_and_or_and_custom_grouping_rules() {
+    for mask in [
+        1_u32 << 15,
+        1 << 16,
+        1 << 30,
+        1 << 31,
+        0xc001_8000,
+        u32::MAX,
+    ] {
+        let other = mask.rotate_left(1);
+        let a = full_groups(mask, other);
+        let b = full_groups(other, mask);
+        assert_eq!(a.memberships.bits(), mask);
+        assert_eq!(b.filter.bits(), mask);
+        assert!(a.test(b) && b.test(a));
+        let blocked = full_groups(other, 0);
+        assert!(!a.test(blocked) && !blocked.test(a));
+        let or_a = InteractionGroups {
+            test_mode: InteractionTestMode::Or,
+            ..a
+        };
+        let or_b = InteractionGroups {
+            test_mode: InteractionTestMode::Or,
+            ..blocked
+        };
+        assert!(or_a.test(or_b) && or_b.test(or_a));
+        assert!(!a.test(or_b) && !or_b.test(a)); // Mixed modes still require And.
+        let custom_a = InteractionGroups {
+            belongs_to_with_grouping: 1 << 31,
+            collides_with_with_grouping: 1 << 30,
+            belongs_to_grouping: 0x8000_0001,
+            ..or_a
+        };
+        let custom_b = InteractionGroups {
+            belongs_to_with_grouping: 1 << 30,
+            collides_with_with_grouping: 0,
+            belongs_to_grouping: 0x8000_0001,
+            ..or_b
+        };
+        assert!(!custom_a.test(custom_b)); // Or cannot bypass the custom predicate.
+        assert!(custom_a.test(InteractionGroups {
+            belongs_to_grouping: 0x8000_0002,
+            ..custom_b
+        }));
+    }
+}
+
+#[test]
+fn high_standard_masks_rediscover_stationary_contacts_and_sensors() {
+    for sensor in [false, true] {
+        for mask in [
+            1_u32 << 15,
+            1 << 16,
+            1 << 30,
+            1 << 31,
+            0xc001_8000,
+            u32::MAX,
+        ] {
+            let other = mask.rotate_left(1);
+            let a_groups = InteractionGroups {
+                belongs_to_with_grouping: 1 << 31,
+                collides_with_with_grouping: 1 << 30,
+                belongs_to_grouping: 0x8000_0001,
+                ..full_groups(mask, 0)
+            };
+            let b_groups = InteractionGroups {
+                belongs_to_with_grouping: 1 << 30,
+                collides_with_with_grouping: 1 << 31,
+                belongs_to_grouping: 0x8000_0001,
+                ..full_groups(other, mask)
+            };
+            let (mut world, a, b) = overlapping(sensor, a_groups, b_groups);
+            let positions = (
+                *world.colliders[a].position(),
+                *world.colliders[b].position(),
+            );
+            world.step();
+            assert!(!interacting(&world, a, b, sensor));
+            let allowed = InteractionGroups {
+                filter: Group::from_bits_retain(other),
+                ..a_groups
+            };
+            world.colliders[a].set_collision_groups(allowed);
+            world.step();
+            assert!(
+                interacting(&world, a, b, sensor),
+                "mask {mask:#x} must rediscover stationary pairs"
+            );
+            world.colliders[a].set_collision_groups(a_groups);
+            world.step();
+            assert!(!interacting(&world, a, b, sensor));
+            world.colliders[a].set_collision_groups(InteractionGroups {
+                collides_with_with_grouping: 0,
+                ..allowed
+            });
+            world.step();
+            assert!(!interacting(&world, a, b, sensor));
+            world.colliders[a].set_collision_groups(allowed);
+            world.step();
+            assert!(interacting(&world, a, b, sensor));
+            world.colliders[a].set_collision_groups(InteractionGroups {
+                collides_with_with_grouping: 0,
+                ..allowed
+            });
+            world.step();
+            assert!(!interacting(&world, a, b, sensor));
+            world.colliders[a].set_collision_groups(InteractionGroups {
+                collides_with_with_grouping: 0,
+                belongs_to_grouping: 0x8000_0002,
+                ..allowed
+            });
+            world.step();
+            assert!(interacting(&world, a, b, sensor));
+            assert_eq!(
+                positions,
+                (
+                    *world.colliders[a].position(),
+                    *world.colliders[b].position()
+                )
+            );
+        }
+    }
+}
+
+#[test]
+fn high_solver_masks_control_impulses_without_changing_collision_groups() {
+    let mut world = PhysicsWorld::new();
+    world.gravity = Vector::ZERO;
+    let collision_a = InteractionGroups {
+        belongs_to_with_grouping: 1 << 30,
+        collides_with_with_grouping: 1 << 16,
+        belongs_to_grouping: 7,
+        ..full_groups(1 << 15, 1 << 31)
+    };
+    let collision_b = InteractionGroups {
+        belongs_to_with_grouping: 1 << 16,
+        collides_with_with_grouping: 1 << 30,
+        belongs_to_grouping: 7,
+        ..full_groups(1 << 31, 1 << 15)
+    };
+    let a = world.insert_collider(
+        ColliderBuilder::ball(1.0)
+            .collision_groups(collision_a)
+            .solver_groups(full_groups(1 << 30, 0)),
+        None,
+    );
+    let body = world.insert_body(
+        RigidBodyBuilder::dynamic()
+            .can_sleep(false)
+            .translation(Vector::X),
+    );
+    let b = world.insert_collider(
+        ColliderBuilder::ball(1.0)
+            .collision_groups(collision_b)
+            .solver_groups(full_groups(1 << 16, 1 << 30)),
+        Some(body),
+    );
+    world.step();
+    assert!(interacting(&world, a, b, false));
+    assert_eq!(world.bodies[body].translation(), Vector::X);
+    assert!(
+        world
+            .narrow_phase
+            .contact_pair(a, b)
+            .unwrap()
+            .manifolds()
+            .iter()
+            .all(|m| !m
+                .data
+                .solver_flags
+                .contains(SolverFlags::COMPUTE_RIGID_IMPULSES))
+    );
+    world.colliders[a].set_solver_groups(full_groups(1 << 30, 1 << 16));
+    world.step();
+    assert!(
+        world.bodies[body].translation().x > 1.0,
+        "matching high solver masks must separate overlapping bodies"
+    );
+    assert_eq!(world.colliders[a].collision_groups(), collision_a);
+    assert_eq!(world.colliders[b].collision_groups(), collision_b);
+    world.colliders[a].set_collision_groups(InteractionGroups {
+        collides_with_with_grouping: 0,
+        ..collision_a
+    });
+    world.step();
+    assert!(!interacting(&world, a, b, false));
+}
+
+#[test]
+fn high_query_masks_use_both_full_width_sides_with_neutral_custom_fields() {
+    for mask in [
+        1_u32 << 15,
+        1 << 16,
+        1 << 30,
+        1 << 31,
+        0xc001_8000,
+        u32::MAX,
+    ] {
+        let mut world = PhysicsWorld::new();
+        let other = mask.rotate_left(1);
+        let collider = world.insert_collider(
+            ColliderBuilder::ball(1.0).collision_groups(InteractionGroups {
+                belongs_to_with_grouping: 0,
+                collides_with_with_grouping: 0,
+                belongs_to_grouping: 7,
+                ..full_groups(mask, other)
+            }),
+            None,
+        );
+        world.step();
+        let ray = Ray::new(Vector::new(-3.0, 0.0, 0.0), Vector::X);
+        let allowed = QueryFilter::default().groups(full_groups(other, mask));
+        assert_eq!(
+            world.cast_ray(&ray, 10.0, true, allowed).unwrap().0,
+            collider
+        );
+        assert!(
+            world
+                .cast_ray(
+                    &ray,
+                    10.0,
+                    true,
+                    QueryFilter::default().groups(full_groups(other, 0))
+                )
+                .is_none()
+        );
+        assert!(
+            world
+                .cast_ray(
+                    &ray,
+                    10.0,
+                    true,
+                    QueryFilter::default().groups(full_groups(0, mask))
+                )
+                .is_none()
+        );
+    }
+}

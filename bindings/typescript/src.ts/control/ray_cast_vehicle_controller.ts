@@ -4,7 +4,8 @@ import {
     BroadPhase,
     Collider,
     ColliderSet,
-    InteractionGroups,
+    QueryInteractionGroups,
+    intoRawQueryGroups,
     NarrowPhase,
 } from "../geometry";
 import {QueryFilterFlags} from "../pipeline";
@@ -58,9 +59,10 @@ export class DynamicRayCastVehicleController {
     public updateVehicle(
         dt: number,
         filterFlags?: QueryFilterFlags,
-        filterGroups?: InteractionGroups,
+        filterGroups?: QueryInteractionGroups,
         filterPredicate?: (collider: Collider) => boolean,
     ) {
+        const rawGroups = intoRawQueryGroups(filterGroups);
         this.raw.update_vehicle(
             dt,
             this.broadPhase.raw,
@@ -68,8 +70,10 @@ export class DynamicRayCastVehicleController {
             this.bodies.raw,
             this.colliders.raw,
             filterFlags,
-            filterGroups,
+            rawGroups[0],
             this.colliders.castClosure(filterPredicate),
+            rawGroups[1],
+            rawGroups[2],
         );
     }
 

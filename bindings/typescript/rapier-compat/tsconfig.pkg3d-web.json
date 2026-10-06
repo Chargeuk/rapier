@@ -1,0 +1,10 @@
+{
+    "extends": "./tsconfig.common.json",
+    "compilerOptions": {
+        "module": "ES2020",
+        "rootDir": "./gen3d-web",
+        "outDir": "./pkg/web",
+        "declarationDir": "./pkg/web"
+    },
+    "files": ["./gen3d-web/rapier.ts"]
+}

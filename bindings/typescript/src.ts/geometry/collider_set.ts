@@ -67,6 +67,37 @@ export class ColliderSet {
         );
     }
 
+    private applyDescriptorGroups(collider: Collider, desc: ColliderDesc) {
+        if (
+            desc.collisionMemberships !== undefined ||
+            desc.collisionFilter !== undefined
+        ) {
+            collider.setDetailedCollisionGroups32(
+                desc.collisionMemberships ?? desc.collisionGroups >>> 16,
+                desc.collisionFilter ?? desc.collisionGroups & 0xffff,
+                desc.belongsToWithGrouping,
+                desc.collidesWithWithGrouping,
+                desc.belongsToGrouping,
+            );
+        } else {
+            collider.setDetailedCollisionGroups(
+                desc.collisionGroups,
+                desc.belongsToWithGrouping,
+                desc.collidesWithWithGrouping,
+                desc.belongsToGrouping,
+            );
+        }
+        if (
+            desc.solverMemberships !== undefined ||
+            desc.solverFilter !== undefined
+        ) {
+            collider.setSolverGroups32(
+                desc.solverMemberships ?? desc.solverGroups >>> 16,
+                desc.solverFilter ?? desc.solverGroups & 0xffff,
+            );
+        }
+    }
+
     /**
      * Creates a new collider and return its integer handle.
      *
@@ -145,14 +176,9 @@ export class ColliderSet {
 
         let parent = hasParent ? bodies.get(parentHandle) : null;
         let collider = new Collider(this, handle, parent, desc.shape);
-        // Apply detailed groups before exposing the collider or stepping the world.
-        // Keep the upstream raw creation signature and its neutral defaults intact.
-        collider.setDetailedCollisionGroups(
-            desc.collisionGroups,
-            desc.belongsToWithGrouping,
-            desc.collidesWithWithGrouping,
-            desc.belongsToGrouping,
-        );
+        // Apply optional full-width overrides before exposing/stepping the collider.
+        // Keep the raw creation signature and packed descriptor defaults intact.
+        this.applyDescriptorGroups(collider, desc);
         this.map.set(handle, collider);
         return collider;
     }
@@ -246,12 +272,7 @@ export class ColliderSet {
 
         let parent = bodies.get(parentHandle);
         let collider = new Collider(this, handle, parent, desc.shape);
-        collider.setDetailedCollisionGroups(
-            desc.collisionGroups,
-            desc.belongsToWithGrouping,
-            desc.collidesWithWithGrouping,
-            desc.belongsToGrouping,
-        );
+        this.applyDescriptorGroups(collider, desc);
         this.map.set(handle, collider);
         return collider;
     }

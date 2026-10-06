@@ -2,7 +2,7 @@ import {RawColliderSet, RawShape, RawVHACDParameters} from "../raw";
 import {Rotation, RotationOps, Vector, VectorOps, scratchBuffer} from "../math";
 import {CoefficientCombineRule, RigidBody, RigidBodySet} from "../dynamics";
 import {ActiveHooks, ActiveEvents} from "../pipeline";
-import {InteractionGroups} from "./interaction_groups";
+import {InteractionGroups, InteractionGroups32} from "./interaction_groups";
 import {
     Shape,
     Cuboid,
@@ -414,6 +414,33 @@ export class Collider {
         this.colliderSet.raw.coSetCollisionGroups(this.handle, groups);
     }
 
+    /** Sets separate u32 masks and restores neutral custom masks/grouping ID. */
+    public setCollisionGroups32(memberships: number, filter: number) {
+        this.colliderSet.raw.coSetCollisionGroups32(
+            this.handle,
+            memberships >>> 0,
+            filter >>> 0,
+        );
+    }
+
+    /** Sets full-width standard masks and all three custom grouping fields. */
+    public setDetailedCollisionGroups32(
+        memberships: number,
+        filter: number,
+        belongsToWithGrouping: number,
+        collidesWithWithGrouping: number,
+        belongsToGrouping: number,
+    ) {
+        this.colliderSet.raw.coSetDetailedCollisionGroups32(
+            this.handle,
+            memberships >>> 0,
+            filter >>> 0,
+            belongsToWithGrouping >>> 0,
+            collidesWithWithGrouping >>> 0,
+            belongsToGrouping >>> 0,
+        );
+    }
+
     /**
      * Sets standard collision groups and the additional same-group masks.
      * Within a matching grouping ID, both membership/collision masks must match.
@@ -446,6 +473,15 @@ export class Collider {
      */
     public setSolverGroups(groups: InteractionGroups) {
         this.colliderSet.raw.coSetSolverGroups(this.handle, groups);
+    }
+
+    /** Solver masks affect impulses, never collision detection or custom groups. */
+    public setSolverGroups32(memberships: number, filter: number) {
+        this.colliderSet.raw.coSetSolverGroups32(
+            this.handle,
+            memberships >>> 0,
+            filter >>> 0,
+        );
     }
 
     /**
@@ -1069,6 +1105,37 @@ export class Collider {
         return this.colliderSet.raw.coSolverGroups(this.handle);
     }
 
+    /** Full-width groups; the legacy collisionGroups getter is still packed. */
+    public collisionGroups32(): InteractionGroups32 {
+        return {
+            memberships:
+                this.colliderSet.raw.coCollisionMemberships(this.handle) >>> 0,
+            filter: this.colliderSet.raw.coCollisionFilter(this.handle) >>> 0,
+        };
+    }
+
+    public solverGroups32(): InteractionGroups32 {
+        return {
+            memberships:
+                this.colliderSet.raw.coSolverMemberships(this.handle) >>> 0,
+            filter: this.colliderSet.raw.coSolverFilter(this.handle) >>> 0,
+        };
+    }
+
+    public belongsToWithGrouping(): number {
+        return this.colliderSet.raw.coBelongsToWithGrouping(this.handle) >>> 0;
+    }
+
+    public collidesWithWithGrouping(): number {
+        return (
+            this.colliderSet.raw.coCollidesWithWithGrouping(this.handle) >>> 0
+        );
+    }
+
+    public belongsToGrouping(): number {
+        return this.colliderSet.raw.coBelongsToGrouping(this.handle) >>> 0;
+    }
+
     /**
      * Tests if this collider contains a point.
      *
@@ -1441,6 +1508,9 @@ export class ColliderDesc {
     translation: Vector;
     isSensor: boolean;
     collisionGroups: InteractionGroups;
+    /** Optional full-width overrides; omitted sides retain the packed descriptor mask. */
+    collisionMemberships?: number;
+    collisionFilter?: number;
     /** Additional membership mask within the same grouping. */
     belongsToWithGrouping: number;
     /** Additional collision mask within the same grouping. */
@@ -1448,6 +1518,8 @@ export class ColliderDesc {
     /** Grouping ID; differing IDs bypass the additional masks. */
     belongsToGrouping: number;
     solverGroups: InteractionGroups;
+    solverMemberships?: number;
+    solverFilter?: number;
     frictionCombineRule: CoefficientCombineRule;
     restitutionCombineRule: CoefficientCombineRule;
     activeEvents: ActiveEvents;
@@ -2196,6 +2268,32 @@ export class ColliderDesc {
      */
     public setCollisionGroups(groups: InteractionGroups): ColliderDesc {
         this.collisionGroups = groups;
+        this.collisionMemberships = undefined;
+        this.collisionFilter = undefined;
+        return this;
+    }
+
+    /** Full-width fields take precedence until setCollisionGroups selects packed masks. */
+    public setCollisionGroups32(
+        memberships: number,
+        filter: number,
+    ): ColliderDesc {
+        this.collisionMemberships = memberships >>> 0;
+        this.collisionFilter = filter >>> 0;
+        return this;
+    }
+
+    public setDetailedCollisionGroups32(
+        memberships: number,
+        filter: number,
+        belongsToWithGrouping: number,
+        collidesWithWithGrouping: number,
+        belongsToGrouping: number,
+    ): ColliderDesc {
+        this.setCollisionGroups32(memberships, filter);
+        this.belongsToWithGrouping = belongsToWithGrouping >>> 0;
+        this.collidesWithWithGrouping = collidesWithWithGrouping >>> 0;
+        this.belongsToGrouping = belongsToGrouping >>> 0;
         return this;
     }
 
@@ -2228,6 +2326,17 @@ export class ColliderDesc {
      */
     public setSolverGroups(groups: InteractionGroups): ColliderDesc {
         this.solverGroups = groups;
+        this.solverMemberships = undefined;
+        this.solverFilter = undefined;
+        return this;
+    }
+
+    public setSolverGroups32(
+        memberships: number,
+        filter: number,
+    ): ColliderDesc {
+        this.solverMemberships = memberships >>> 0;
+        this.solverFilter = filter >>> 0;
         return this;
     }
 

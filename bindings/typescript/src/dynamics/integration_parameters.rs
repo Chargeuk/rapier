@@ -43,6 +43,16 @@ impl RawIntegrationParameters {
     }
 
     #[wasm_bindgen(getter)]
+    pub fn warmstartJoints(&self) -> bool {
+        self.0.warmstart_joints
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_warmstartJoints(&mut self, value: bool) {
+        self.0.warmstart_joints = value;
+    }
+
+    #[wasm_bindgen(getter)]
     pub fn maxCcdSubsteps(&self) -> usize {
         self.0.max_ccd_substeps
     }
@@ -159,5 +169,28 @@ impl RawIntegrationParameters {
     #[wasm_bindgen(setter)]
     pub fn set_lengthUnit(&mut self, value: f32) {
         self.0.length_unit = value
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn joint_warmstart_accessor_changes_only_the_native_joint_flag() {
+        let mut raw = RawIntegrationParameters::new();
+        let defaults = raw.0;
+        assert!(!raw.warmstartJoints());
+        raw.set_warmstartJoints(true);
+        assert!(raw.warmstartJoints());
+        assert_eq!(
+            raw.0,
+            IntegrationParameters {
+                warmstart_joints: true,
+                ..defaults
+            }
+        );
+        raw.set_warmstartJoints(false);
+        assert_eq!(raw.0, defaults); // Contact warmth, softness, dt and iterations are untouched.
     }
 }

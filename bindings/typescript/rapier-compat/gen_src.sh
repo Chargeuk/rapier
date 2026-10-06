@@ -51,6 +51,18 @@ for feature in $variants; do
   cp ./tsconfig.common.json ./tsconfig.json "./builds/${feature}/"
   cp "./tsconfig.pkg${dimension}d.json" "./builds/${feature}/tsconfig.pkg.json"
 
+  if [ "$feature" = "3d" ]; then
+    # Web classes and init import the same, unmodified wasm-bindgen module.
+    # Keep its asset URL intact; only the compat staging copy deletes import.meta.
+    web_dir="${pkg_dir}/web"
+    mkdir -p "$web_dir"
+    cp ./builds/3d/wasm-build/rapier_wasm3d* "$web_dir/"
+    mkdir -p ./builds/3d/gen3d-web
+    cp -r ./gen3d/. ./builds/3d/gen3d-web/
+    cp ./src3d-web/* ./builds/3d/gen3d-web/
+    cp ./tsconfig.pkg3d-web.json ./builds/3d/tsconfig.web.json
+  fi
+
   # "import.meta" causes Babel to choke, but the code path is never taken so just remove it.
   sed -i.bak 's/import.meta.url/"<deleted>"/g' "${dist_dir}/rapier_wasm${dimension}d.js"
 

@@ -153,6 +153,8 @@ impl RawKinematicCharacterController {
         filter_flags: u32,
         filter_groups: Option<u32>,
         filter_predicate: &js_sys::Function,
+        filter_memberships: Option<u32>,
+        filter_mask: Option<u32>,
     ) {
         let handle = crate::utils::collider_handle(collider_handle);
         if let Some(collider) = colliders.0.get(handle) {
@@ -164,7 +166,11 @@ impl RawKinematicCharacterController {
                 let query_filter = QueryFilter {
                     flags: QueryFilterFlags::from_bits(filter_flags)
                         .unwrap_or(QueryFilterFlags::empty()),
-                    groups: filter_groups.map(crate::geometry::unpack_interaction_groups),
+                    groups: crate::geometry::unpack_query_groups(
+                        filter_groups,
+                        filter_memberships,
+                        filter_mask,
+                    ),
                     exclude_collider: Some(handle),
                     exclude_rigid_body: collider_parent,
                     predicate,

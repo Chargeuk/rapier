@@ -69,6 +69,15 @@ export class IntegrationParameters {
         return this.raw.numInternalPgsIterations;
     }
 
+    /** Warm-start impulse joints using previous impulses (native default: false). */
+    get warmstartJoints(): boolean {
+        return this.raw.warmstartJoints;
+    }
+
+    set warmstartJoints(value: boolean) {
+        this.raw.warmstartJoints = value;
+    }
+
     /**
      * Maximum number of substeps performed by the  solver (default: `1`).
      */

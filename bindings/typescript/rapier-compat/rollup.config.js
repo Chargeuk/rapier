@@ -37,7 +37,7 @@ const config = (dim, features_postfix) => {
                             config.name = `@dimforge/rapier${features_postfix}-compat`;
                             if (features_postfix === "3d") {
                                 config.name = "@chargeuk/rapier3d-compat";
-                                config.version = "0.21.0-chargeuk.1";
+                                config.version = "0.21.0-chargeuk.2";
                                 config.repository = {
                                     type: "git",
                                     url: "git+https://github.com/Chargeuk/rapier.git",
@@ -58,8 +58,23 @@ const config = (dim, features_postfix) => {
                                     import: "./dist/rapier.mjs",
                                 },
                             };
+                            if (features_postfix === "3d") {
+                                config.exports["./web"] = {
+                                    types: "./web/rapier.d.ts",
+                                    import: "./web/rapier.mjs",
+                                    default: "./web/rapier.mjs",
+                                };
+                                // Locked TS 4.8 consumers also use node resolution.
+                                config.typesVersions = {
+                                    "*": {web: ["web/rapier.d.ts"]},
+                                };
+                                config.description +=
+                                    " External-WASM web entry available.";
+                            }
                             // delete config.module;
                             config.files = ["dist"];
+                            if (features_postfix === "3d")
+                                config.files.push("web");
                             // The base manifest's `sideEffects: ["./*.js"]` matches
                             // nothing (the bundles are .cjs/.mjs), which bundlers already
                             // treat as "no side effects"; say so explicitly.
@@ -94,13 +109,34 @@ const config = (dim, features_postfix) => {
     };
 };
 
+const webConfig = {
+    input: "builds/3d/gen3d-web/rapier.ts",
+    output: {
+        file: "builds/3d/pkg/web/rapier.mjs",
+        format: "es",
+        sourcemap: true,
+        exports: "named",
+    },
+    plugins: [
+        terser(),
+        nodeResolve(),
+        commonjs(),
+        typescript({
+            tsconfig: path.resolve(__dirname, "builds/3d/tsconfig.web.json"),
+            sourceMap: true,
+            inlineSources: true,
+        }),
+        filesize(),
+    ],
+};
+
 const variant = process.env.RAPIER_COMPAT_VARIANT;
 if (variant && variant !== "3d" && variant !== "all") {
     throw new Error(`Unsupported RAPIER_COMPAT_VARIANT: ${variant}`);
 }
 
 export default variant === "3d"
-    ? [config("3d", "3d")]
+    ? [config("3d", "3d"), webConfig]
     : [
           config("2d", "2d"),
           config("2d", "2d-deterministic"),
@@ -108,4 +144,5 @@ export default variant === "3d"
           config("3d", "3d"),
           config("3d", "3d-deterministic"),
           config("3d", "3d-simd"),
+          webConfig,
       ];

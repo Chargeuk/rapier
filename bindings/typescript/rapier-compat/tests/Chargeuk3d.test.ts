@@ -1,14 +1,20 @@
 import {
     ActiveCollisionTypes,
+    Ball,
     Collider,
     ColliderDesc,
     init,
     JointData,
+    MotorModel,
     Ray,
     RevoluteImpulseJoint,
     RigidBodyDesc,
     World,
 } from "../builds/3d/pkg";
+
+const masks32 = [
+    0x8000, 0x10000, 0x4000_0000, 0x8000_0000, 0xc001_8000, 0xffff_ffff,
+];
 
 describe("Chargeuk 3D compatibility behaviour", () => {
     let world: World;
@@ -153,6 +159,467 @@ describe("Chargeuk 3D compatibility behaviour", () => {
         ).toBe(collider.handle);
         expect(world.castRay(ray, 10, true, undefined, 0)).toBeNull();
     });
+
+    test.each(masks32)(
+        "separate descriptor/getter masks round-trip unsigned without truncation (%s)",
+        (mask) => {
+            const filter = ((mask << 1) | (mask >>> 31)) >>> 0;
+            const descriptor = ColliderDesc.ball(1)
+                .setDetailedCollisionGroups32(
+                    mask | 0,
+                    filter | 0,
+                    1 << 31,
+                    1 << 30,
+                    0x8000_0001 | 0,
+                )
+                .setSolverGroups32(filter | 0, mask | 0);
+            expect(descriptor.collisionMemberships).toBe(mask);
+            expect(descriptor.collisionFilter).toBe(filter);
+            const collider = world.createCollider(descriptor);
+            expect(collider.collisionGroups32()).toEqual({
+                memberships: mask,
+                filter,
+            });
+            expect(collider.solverGroups32()).toEqual({
+                memberships: filter,
+                filter: mask,
+            });
+            expect(collider.belongsToWithGrouping()).toBe(0x8000_0000);
+            expect(collider.collidesWithWithGrouping()).toBe(0x4000_0000);
+            expect(collider.belongsToGrouping()).toBe(0x8000_0001);
+            collider.setSolverGroups32(1 << 31, mask | 0);
+            expect(collider.collisionGroups32()).toEqual({
+                memberships: mask,
+                filter,
+            });
+            expect(collider.belongsToGrouping()).toBe(0x8000_0001);
+            collider.setCollisionGroups32(mask | 0, filter | 0);
+            expect(collider.belongsToWithGrouping()).toBe(0xffff_ffff);
+            expect(collider.collidesWithWithGrouping()).toBe(0xffff_ffff);
+            expect(collider.belongsToGrouping()).toBe(0xffff_ffff);
+            collider.setCollisionGroups(0x0002_0001);
+            collider.setSolverGroups(0x0001_0002);
+            expect(collider.collisionGroups()).toBe(0x0002_0001);
+            expect(collider.collisionGroups32()).toEqual({
+                memberships: 2,
+                filter: 1,
+            });
+            expect(collider.solverGroups()).toBe(0x0001_0002);
+            descriptor
+                .setCollisionGroups(0x0002_0001)
+                .setSolverGroups(0x0001_0002);
+            const packed = world.createCollider(descriptor);
+            expect(packed.collisionGroups32()).toEqual({
+                memberships: 2,
+                filter: 1,
+            });
+            expect(packed.solverGroups32()).toEqual({
+                memberships: 1,
+                filter: 2,
+            });
+        },
+    );
+
+    test("direct descriptor masks and partial overrides preserve packed defaults", () => {
+        const descriptor = ColliderDesc.ball(1);
+        descriptor.collisionMemberships = 1 << 31;
+        descriptor.collisionFilter = (1 << 16) | (1 << 30);
+        descriptor.solverMemberships = 1 << 30;
+        descriptor.solverFilter = 1 << 31;
+        const collider = world.createCollider(descriptor);
+        expect(collider.collisionGroups32()).toEqual({
+            memberships: 0x8000_0000,
+            filter: 0x4001_0000,
+        });
+        expect(collider.solverGroups32()).toEqual({
+            memberships: 0x4000_0000,
+            filter: 0x8000_0000,
+        });
+        const partial = ColliderDesc.ball(1).setCollisionGroups(0x0002_0001);
+        partial.collisionMemberships = 1 << 31;
+        expect(world.createCollider(partial).collisionGroups32()).toEqual({
+            memberships: 0x8000_0000,
+            filter: 1,
+        });
+        const legacy = world.createCollider(ColliderDesc.ball(1));
+        expect(legacy.collisionGroups32()).toEqual({
+            memberships: 0xffff,
+            filter: 0xffff,
+        });
+    });
+
+    test.each([false, true])(
+        "high standard and detailed masks rediscover stationary pairs (sensor=%s)",
+        (sensor) => {
+            for (const mask of masks32) {
+                const filter = ((mask << 1) | (mask >>> 31)) >>> 0;
+                const a = world.createCollider(
+                    desc(1 << 31, 1 << 30, 7, sensor).setCollisionGroups32(
+                        mask,
+                        0,
+                    ),
+                );
+                const b = world.createCollider(
+                    desc(1 << 30, 1 << 31, 7)
+                        .setTranslation(1, 0, 0)
+                        .setCollisionGroups32(filter, mask),
+                );
+                const positions = [a.translation(), b.translation()];
+                world.step();
+                expect(interacting(a, b, sensor)).toBe(false);
+                a.setDetailedCollisionGroups32(
+                    mask,
+                    filter,
+                    1 << 31,
+                    1 << 30,
+                    7,
+                );
+                world.step();
+                expect(interacting(a, b, sensor)).toBe(true);
+                a.setDetailedCollisionGroups32(mask, 0, 1 << 31, 1 << 30, 7);
+                world.step();
+                expect(interacting(a, b, sensor)).toBe(false);
+                a.setDetailedCollisionGroups32(mask, filter, 1 << 31, 0, 7);
+                world.step();
+                expect(interacting(a, b, sensor)).toBe(false);
+                a.setDetailedCollisionGroups32(mask, filter, 1 << 31, 0, 8);
+                world.step();
+                expect(interacting(a, b, sensor)).toBe(true);
+                a.setDetailedCollisionGroups32(0, filter, 1 << 31, 1 << 30, 8);
+                world.step();
+                expect(interacting(a, b, sensor)).toBe(false);
+                expect([a.translation(), b.translation()]).toEqual(positions);
+                world.removeCollider(a, false);
+                world.removeCollider(b, false);
+            }
+        },
+    );
+
+    test("high solver masks change impulses but preserve contacts and detailed collision filtering", () => {
+        // Unlike the stationary fixtures, this pair is fixed/dynamic.
+        const a = world.createCollider(
+            desc(1 << 30, 1 << 16, 7)
+                .setActiveCollisionTypes(ActiveCollisionTypes.DEFAULT)
+                .setCollisionGroups32(1 << 15, 1 << 31)
+                .setSolverGroups32(1 << 30, 0),
+        );
+        const body = world.createRigidBody(
+            RigidBodyDesc.dynamic().setCanSleep(false).setTranslation(1, 0, 0),
+        );
+        const b = world.createCollider(
+            desc(1 << 16, 1 << 30, 7)
+                .setActiveCollisionTypes(ActiveCollisionTypes.DEFAULT)
+                .setCollisionGroups32(1 << 31, 1 << 15)
+                .setSolverGroups32(1 << 16, 1 << 30),
+            body,
+        );
+        world.step();
+        expect(interacting(a, b, false)).toBe(true);
+        expect(body.translation()).toEqual({x: 1, y: 0, z: 0});
+        a.setSolverGroups32(1 << 30, 1 << 16);
+        world.step();
+        expect(body.translation().x).toBeGreaterThan(1);
+        expect(a.collisionGroups32()).toEqual({
+            memberships: 0x8000,
+            filter: 0x8000_0000,
+        });
+        expect(a.belongsToGrouping()).toBe(7);
+        a.setDetailedCollisionGroups32(1 << 15, 1 << 31, 1 << 30, 0, 7);
+        world.step();
+        expect(interacting(a, b, false)).toBe(false);
+    });
+
+    test.each(masks32)(
+        "all world query families accept full-width groups (%s)",
+        (mask) => {
+            const filter = ((mask << 1) | (mask >>> 31)) >>> 0;
+            const collider = world.createCollider(
+                desc(0, 0, 7).setCollisionGroups32(mask, filter),
+            );
+            world.step();
+            const ray = new Ray({x: -3, y: 0, z: 0}, {x: 1, y: 0, z: 0});
+            // Non-solid ball feature projection is singular at the exact center.
+            const point = {x: 0.25, y: 0, z: 0};
+            const rotation = {x: 0, y: 0, z: 0, w: 1};
+            const shape = new Ball(0.1);
+            for (const allowed of [true, false]) {
+                const groups = {
+                    memberships: filter | 0,
+                    filter: allowed ? mask | 0 : 0,
+                };
+                const handle = allowed ? collider.handle : null;
+                expect(
+                    world.castRay(ray, 10, true, undefined, groups)?.collider
+                        .handle ?? null,
+                ).toBe(handle);
+                expect(
+                    world.castRayAndGetNormal(ray, 10, true, undefined, groups)
+                        ?.collider.handle ?? null,
+                ).toBe(handle);
+                expect(
+                    world.projectPoint(point, true, undefined, groups)?.collider
+                        .handle ?? null,
+                ).toBe(handle);
+                expect(
+                    world.projectPointAndGetFeature(point, undefined, groups)
+                        ?.collider.handle ?? null,
+                ).toBe(handle);
+                expect(
+                    world.intersectionWithShape(
+                        point,
+                        rotation,
+                        shape,
+                        undefined,
+                        groups,
+                    )?.handle ?? null,
+                ).toBe(handle);
+                expect(
+                    world.castShape(
+                        ray.origin,
+                        rotation,
+                        ray.dir,
+                        shape,
+                        0,
+                        10,
+                        true,
+                        undefined,
+                        groups,
+                    )?.collider.handle ?? null,
+                ).toBe(handle);
+                const rays: number[] = [];
+                world.intersectionsWithRay(
+                    ray,
+                    10,
+                    true,
+                    (hit) => {
+                        rays.push(hit.collider.handle);
+                        return true;
+                    },
+                    undefined,
+                    groups,
+                );
+                const points: number[] = [];
+                world.intersectionsWithPoint(
+                    point,
+                    (hit) => {
+                        points.push(hit.handle);
+                        return true;
+                    },
+                    undefined,
+                    groups,
+                );
+                const shapes: number[] = [];
+                world.intersectionsWithShape(
+                    point,
+                    rotation,
+                    shape,
+                    (hit) => {
+                        shapes.push(hit.handle);
+                        return true;
+                    },
+                    undefined,
+                    groups,
+                );
+                for (const hits of [rays, points, shapes]) {
+                    expect(hits).toEqual(allowed ? [collider.handle] : []);
+                }
+            }
+            expect(
+                world.castRay(ray, 10, true, undefined, {
+                    memberships: 0,
+                    filter: mask,
+                }),
+            ).toBeNull();
+            const groups = {memberships: filter, filter: mask};
+            expect(
+                world.castRay(ray, 10, true, undefined, groups, collider),
+            ).toBeNull();
+            expect(
+                world.castRay(
+                    ray,
+                    10,
+                    true,
+                    undefined,
+                    groups,
+                    undefined,
+                    undefined,
+                    () => false,
+                ),
+            ).toBeNull();
+        },
+    );
+
+    test("character movement queries retain full-width category filters", () => {
+        world.createCollider(
+            ColliderDesc.ball(0.5)
+                .setTranslation(2, 0, 0)
+                .setCollisionGroups32(1 << 31, 1 << 16),
+        );
+        const body = world.createRigidBody(
+            RigidBodyDesc.kinematicPositionBased(),
+        );
+        const collider = world.createCollider(
+            ColliderDesc.ball(0.2).setCollisionGroups32(1 << 16, 1 << 31),
+            body,
+        );
+        const controller = world.createCharacterController(0.01);
+        try {
+            world.step();
+            controller.computeColliderMovement(
+                collider,
+                {x: 4, y: 0, z: 0},
+                undefined,
+                {memberships: 1 << 16, filter: 1 << 31},
+            );
+            expect(controller.computedMovement().x).toBeLessThan(2);
+            controller.computeColliderMovement(
+                collider,
+                {x: 4, y: 0, z: 0},
+                undefined,
+                {memberships: 1 << 16, filter: 0},
+            );
+            expect(controller.computedMovement().x).toBeCloseTo(4);
+        } finally {
+            world.removeCharacterController(controller);
+        }
+    });
+
+    test("vehicle wheel queries use separate high membership and filter bits", () => {
+        world.createCollider(
+            ColliderDesc.cuboid(4, 0.1, 4)
+                .setTranslation(0, -0.1, 0)
+                .setCollisionGroups32(1 << 31, 1 << 16),
+        );
+        const chassis = world.createRigidBody(
+            RigidBodyDesc.dynamic().setCanSleep(false).setTranslation(0, 1, 0),
+        );
+        world.createCollider(ColliderDesc.ball(0.1), chassis);
+        const vehicle = world.createVehicleController(chassis);
+        try {
+            vehicle.addWheel(
+                {x: 0, y: 0, z: 0},
+                {x: 0, y: -1, z: 0},
+                {x: 1, y: 0, z: 0},
+                1,
+                0.2,
+            );
+            world.step();
+            vehicle.updateVehicle(world.timestep, undefined, {
+                memberships: 1 << 16,
+                filter: 1 << 31,
+            });
+            expect(vehicle.wheelIsInContact(0)).toBe(true);
+            vehicle.updateVehicle(world.timestep, undefined, {
+                memberships: 1 << 16,
+                filter: 0,
+            });
+            expect(vehicle.wheelIsInContact(0)).toBe(false);
+        } finally {
+            world.removeVehicleController(vehicle);
+        }
+    });
+
+    test.each([false, true])(
+        "joint warm-start flag reaches native parameters and keeps motors finite through updates/teleports (%s)",
+        (warmstart) => {
+            const params = world.integrationParameters;
+            const settings = () => [
+                params.dt,
+                params.numSolverIterations,
+                params.numInternalPgsIterations,
+                params.contact_erp,
+                params.normalizedAllowedLinearError,
+                params.normalizedPredictionDistance,
+            ];
+            const defaults = settings();
+            expect(params.warmstartJoints).toBe(false);
+            params.warmstartJoints = warmstart;
+            expect(params.raw.warmstartJoints).toBe(warmstart);
+            const parent = world.createRigidBody(RigidBodyDesc.fixed());
+            const child = world.createRigidBody(
+                RigidBodyDesc.dynamic().setCanSleep(false),
+            );
+            world.createCollider(ColliderDesc.ball(0.25), child);
+            const joint = world.createImpulseJoint(
+                JointData.revolute(
+                    {x: 0, y: 0, z: 0},
+                    {x: 0, y: 0, z: 0},
+                    {x: 0, y: 0, z: 1},
+                ),
+                parent,
+                child,
+                true,
+            ) as RevoluteImpulseJoint;
+            joint.setContactsEnabled(false);
+            joint.configureMotorModel(MotorModel.AccelerationBased);
+            const bend = () => {
+                const p = parent.rotation();
+                const c = child.rotation();
+                // Independent relative twist for this deliberately Z-only test world.
+                return (
+                    2 * Math.atan2(p.w * c.z - p.z * c.w, p.w * c.w + p.z * c.z)
+                );
+            };
+            const step = (count: number) => {
+                for (let i = 0; i < count; i += 1) {
+                    world.step();
+                    const rotation = child.rotation();
+                    for (const vector of [
+                        child.translation(),
+                        child.linvel(),
+                        child.angvel(),
+                        rotation,
+                    ]) {
+                        expect(
+                            Number.isFinite(vector.x) &&
+                                Number.isFinite(vector.y) &&
+                                Number.isFinite(vector.z),
+                        ).toBe(true);
+                    }
+                    expect(Number.isFinite(rotation.w)).toBe(true);
+                }
+            };
+            for (const target of [0.7, -0.9, 1.2]) {
+                joint.configureMotorPosition(target, 1000, 60);
+                step(180);
+                expect(Math.abs(bend() - target)).toBeLessThan(0.05);
+            }
+            for (let i = 0; i < 24; i += 1) {
+                joint.configureMotorPosition(
+                    i % 2 === 0 ? -0.8 : 0.8,
+                    1000,
+                    60,
+                );
+                step(4);
+            }
+            const position = {x: 2, y: -3, z: 1};
+            parent.setTranslation(position, true);
+            parent.setRotation(
+                {x: 0, y: 0, z: Math.sin(0.35 / 2), w: Math.cos(0.35 / 2)},
+                true,
+            );
+            child.setTranslation(position, true);
+            child.setRotation(
+                {x: 0, y: 0, z: Math.sin(-0.5 / 2), w: Math.cos(-0.5 / 2)},
+                true,
+            );
+            child.setLinvel({x: 0, y: 0, z: 0}, true);
+            child.setAngvel({x: 0, y: 0, z: 0}, true);
+            joint.configureMotorPosition(0.6, 1000, 60);
+            step(240);
+            expect(Math.abs(bend() - 0.6)).toBeLessThan(0.05);
+            expect(child.translation().x).toBeCloseTo(position.x, 2);
+            expect(child.translation().y).toBeCloseTo(position.y, 2);
+            expect(child.translation().z).toBeCloseTo(position.z, 2);
+            expect(settings()).toEqual(defaults);
+            params.warmstartJoints = !warmstart;
+            expect(params.raw.warmstartJoints).toBe(!warmstart);
+            joint.configureMotorPosition(-0.4, 1000, 60);
+            step(180);
+            expect(Math.abs(bend() + 0.4)).toBeLessThan(0.05);
+            expect(settings()).toEqual(defaults);
+        },
+    );
 
     test.each([false, true])(
         "revolute limits at creation and after updates (independent axes=%s)",

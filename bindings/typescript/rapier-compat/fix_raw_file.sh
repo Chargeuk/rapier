@@ -23,6 +23,10 @@ if [ "$feature" = "3d" ]; then
     declarations="builds/${feature}/pkg/dist/rapier_wasm${dimension}.d.ts"
     sed -i.bak '/^[[:space:]]*\[Symbol\.dispose\](): void;[[:space:]]*$/d' "$declarations"
     rm -f "${declarations}.bak"
+    echo 'export * from "./rapier_wasm3d";' > builds/3d/pkg/web/raw.d.ts
+    declarations="builds/3d/pkg/web/rapier_wasm3d.d.ts"
+    sed -i.bak '/^[[:space:]]*\[Symbol\.dispose\](): void;[[:space:]]*$/d' "$declarations"
+    rm -f "${declarations}.bak"
 fi
 
 done;
