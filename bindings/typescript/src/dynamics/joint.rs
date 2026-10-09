@@ -65,7 +65,7 @@ impl From<JointAxesMask> for RawJointType {
             | JointAxesMask::ANG_X
             | JointAxesMask::ANG_Y
             | JointAxesMask::ANG_Z;
-        let sph_axes = JointAxesMask::ANG_X | JointAxesMask::ANG_Y | JointAxesMask::ANG_Z;
+        let sph_axes = JointAxesMask::LOCKED_SPHERICAL_AXES;
         let fix_axes = JointAxesMask::LIN_X
             | JointAxesMask::LIN_Y
             | JointAxesMask::LIN_Z
@@ -357,6 +357,30 @@ impl RawGenericJoint {
 mod tests {
     use super::*;
     use rapier::math::Vector;
+
+    #[cfg(feature = "dim3")]
+    #[test]
+    fn spherical_joint_type_uses_locked_linear_axes() {
+        let anchor = RawVector(Vector::ZERO);
+        let joint = RawGenericJoint::spherical(&anchor, &anchor);
+        assert_eq!(joint.0.locked_axes, JointAxesMask::LOCKED_SPHERICAL_AXES);
+        assert!(matches!(joint.0.locked_axes.into(), RawJointType::Spherical));
+        // Locking rotations leaves translations free; it is not a spherical joint.
+        let angular = JointAxesMask::ANG_X | JointAxesMask::ANG_Y | JointAxesMask::ANG_Z;
+        assert!(matches!(angular.into(), RawJointType::Generic));
+
+        let mut bodies = rapier::dynamics::RigidBodySet::new();
+        let parent = bodies.insert(rapier::dynamics::RigidBodyBuilder::fixed());
+        let child = bodies.insert(rapier::dynamics::RigidBodyBuilder::dynamic());
+        let mut joints = crate::dynamics::RawImpulseJointSet::new();
+        let handle = joints.createJoint(
+            &joint,
+            crate::utils::flat_handle(parent.0),
+            crate::utils::flat_handle(child.0),
+            true,
+        );
+        assert!(matches!(joints.jointType(handle), RawJointType::Spherical));
+    }
 
     #[test]
     fn revolute_creation_respects_enabled_and_disabled_limits() {

@@ -37,7 +37,7 @@ const config = (dim, features_postfix) => {
                             config.name = `@dimforge/rapier${features_postfix}-compat`;
                             if (features_postfix === "3d") {
                                 config.name = "@chargeuk/rapier3d-compat";
-                                config.version = "0.21.0-chargeuk.2";
+                                config.version = "0.21.0-chargeuk.3";
                                 config.repository = {
                                     type: "git",
                                     url: "git+https://github.com/Chargeuk/rapier.git",

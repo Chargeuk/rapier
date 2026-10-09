@@ -7,6 +7,48 @@ const {createRequire} = require("node:module");
 const {execFileSync} = require("node:child_process");
 const ts = require("typescript");
 
+function assertSphericalMotorContract(R) {
+    const half = 0.4;
+    const rotations = [
+        {x: Math.sin(half), y: 0, z: 0, w: Math.cos(half)},
+        {x: 0, y: -Math.sin(half), z: 0, w: Math.cos(half)},
+        {x: 0, y: 0, z: Math.sin(half), w: Math.cos(half)},
+        {x: 0.3, y: -0.4, z: 0.5, w: Math.sqrt(0.5)},
+    ];
+    for (const rotation of rotations) {
+        const world = new R.World({x: 0, y: 0, z: 0});
+        try {
+            const parent = world.createRigidBody(R.RigidBodyDesc.fixed());
+            const child = world.createRigidBody(
+                R.RigidBodyDesc.dynamic().setCanSleep(false).setRotation(rotation),
+            );
+            world.createCollider(R.ColliderDesc.ball(0.2), child);
+            const anchor = {x: 0, y: 0, z: 0};
+            const joint = world.createImpulseJoint(
+                R.JointData.spherical(anchor, anchor), parent, child, true,
+            );
+            assert(joint instanceof R.SphericalImpulseJoint);
+            assert.equal(joint.type(), R.JointType.Spherical);
+            assert.equal(world.impulseJoints.len(), 1);
+            assert.equal(typeof joint.configureMotorModel, "function");
+            assert.equal(typeof joint.configureMotorPosition, "function");
+            for (const axis of [R.JointAxis.AngX, R.JointAxis.AngY, R.JointAxis.AngZ]) {
+                joint.configureMotorModel(axis, R.MotorModel.AccelerationBased);
+                joint.configureMotorPosition(axis, 0, 200, 2 * Math.sqrt(200));
+            }
+            // Starting off target on each axis proves all three native motors work.
+            for (let i = 0; i < 600; i += 1) world.step();
+            const q = child.rotation();
+            assert(Math.hypot(q.x, q.y, q.z) < 0.001, "spherical motors must reach identity");
+            assert(Math.abs(Math.abs(q.w) - 1) < 0.001);
+            const v = child.angvel();
+            assert(Math.hypot(v.x, v.y, v.z) < 0.005, "spherical motors must settle");
+        } finally {
+            world.free();
+        }
+    }
+}
+
 async function main() {
     const pkg = path.resolve(__dirname, "../builds/3d/pkg");
     const artifacts = fs.mkdtempSync(
@@ -36,7 +78,7 @@ async function main() {
         ),
     );
     assert.equal(pack.name, "@chargeuk/rapier3d-compat");
-    assert.equal(pack.version, "0.21.0-chargeuk.2");
+    assert.equal(pack.version, "0.21.0-chargeuk.3");
     assert.equal(pack.integrity, dry.integrity);
     for (const file of [
         "package.json",
@@ -121,6 +163,7 @@ async function main() {
     assert.equal(cjs.init(), cjsInitialization);
     await cjsInitialization;
     assert.equal(cjs.version(), "0.21.0"); // Internal binding version is unchanged.
+    assertSphericalMotorContract(cjs);
     for (const name of [
         "World",
         "ColliderDesc",
@@ -159,6 +202,9 @@ async function main() {
         const webModule = await import('@chargeuk/rapier3d-compat/web');
         assert.equal(Web.World, webModule.World);
         assert.deepEqual(Object.keys(Web).sort(), Object.keys(R.default).sort());
+        ${assertSphericalMotorContract.toString()}
+        assertSphericalMotorContract(R);
+        assertSphericalMotorContract(Web);
         const world = new R.World({x: 0, y: 0, z: 0});
         try {
             const collider = world.createCollider(R.ColliderDesc.ball(1).setBelongsToGrouping(7));
@@ -211,6 +257,7 @@ async function main() {
                 "tarball",
                 "CJS",
                 "ESM",
+                "spherical-wrapper-and-three-axis-motors-CJS-ESM-web",
                 "web-loading",
                 "TypeScript-root-and-web",
             ],
