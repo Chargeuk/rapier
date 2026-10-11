@@ -32,7 +32,8 @@ const generic = world.createImpulseJoint(
     body,
     true,
 ) as GenericImpulseJoint;
-const defaultExportClass: typeof GenericImpulseJoint = RAPIER.GenericImpulseJoint;
+const defaultExportClass: typeof GenericImpulseJoint =
+    RAPIER.GenericImpulseJoint;
 for (const axis of [
     JointAxis.LinX,
     JointAxis.LinY,
@@ -52,7 +53,13 @@ for (const axis of [
         100,
         20,
     );
-    const combinedResult: void = generic.configureMotor(axis, 0.3, 0.2, 100, 20);
+    const combinedResult: void = generic.configureMotor(
+        axis,
+        0.3,
+        0.2,
+        100,
+        20,
+    );
     const forceResult: void = generic.setMotorMaxForce(axis, 5);
     void [
         modelResult,

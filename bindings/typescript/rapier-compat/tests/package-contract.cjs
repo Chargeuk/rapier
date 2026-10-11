@@ -20,29 +20,44 @@ function assertSphericalMotorContract(R) {
         try {
             const parent = world.createRigidBody(R.RigidBodyDesc.fixed());
             const child = world.createRigidBody(
-                R.RigidBodyDesc.dynamic().setCanSleep(false).setRotation(rotation),
+                R.RigidBodyDesc.dynamic()
+                    .setCanSleep(false)
+                    .setRotation(rotation),
             );
             world.createCollider(R.ColliderDesc.ball(0.2), child);
             const anchor = {x: 0, y: 0, z: 0};
             const joint = world.createImpulseJoint(
-                R.JointData.spherical(anchor, anchor), parent, child, true,
+                R.JointData.spherical(anchor, anchor),
+                parent,
+                child,
+                true,
             );
             assert(joint instanceof R.SphericalImpulseJoint);
             assert.equal(joint.type(), R.JointType.Spherical);
             assert.equal(world.impulseJoints.len(), 1);
             assert.equal(typeof joint.configureMotorModel, "function");
             assert.equal(typeof joint.configureMotorPosition, "function");
-            for (const axis of [R.JointAxis.AngX, R.JointAxis.AngY, R.JointAxis.AngZ]) {
+            for (const axis of [
+                R.JointAxis.AngX,
+                R.JointAxis.AngY,
+                R.JointAxis.AngZ,
+            ]) {
                 joint.configureMotorModel(axis, R.MotorModel.AccelerationBased);
                 joint.configureMotorPosition(axis, 0, 200, 2 * Math.sqrt(200));
             }
             // Starting off target on each axis proves all three native motors work.
             for (let i = 0; i < 600; i += 1) world.step();
             const q = child.rotation();
-            assert(Math.hypot(q.x, q.y, q.z) < 0.001, "spherical motors must reach identity");
+            assert(
+                Math.hypot(q.x, q.y, q.z) < 0.001,
+                "spherical motors must reach identity",
+            );
             assert(Math.abs(Math.abs(q.w) - 1) < 0.001);
             const v = child.angvel();
-            assert(Math.hypot(v.x, v.y, v.z) < 0.005, "spherical motors must settle");
+            assert(
+                Math.hypot(v.x, v.y, v.z) < 0.005,
+                "spherical motors must settle",
+            );
         } finally {
             world.free();
         }
@@ -115,7 +130,8 @@ function assertGenericMotorContract(R) {
         for (let i = 0; i < 300; i += 1) world.step();
         components.forEach((component) => {
             assert(
-                Math.abs(body.translation()[component] - goal[component]) < 0.005,
+                Math.abs(body.translation()[component] - goal[component]) <
+                    0.005,
             );
             assert(Math.abs(body.linvel()[component]) < 0.005);
         });

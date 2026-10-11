@@ -26,7 +26,7 @@ const axes = [
     {axis: JointAxis.AngY, component: "y" as const, angular: true},
     {axis: JointAxis.AngZ, component: "z" as const, angular: true},
 ];
-type Axis = (typeof axes)[number];
+type Axis = typeof axes[number];
 
 function magnitude(vector: {x: number; y: number; z: number}) {
     return Math.hypot(vector.x, vector.y, vector.z);
@@ -61,7 +61,12 @@ describe("GenericImpulseJoint motors in the built 3D WASM package", () => {
         );
         // No locked axes: translation motors must not lock the body's rotation.
         const joint = world.createImpulseJoint(
-            JointData.generic(zero, zero, {x: 1, y: 0, z: 0}, 0 as JointAxesMask),
+            JointData.generic(
+                zero,
+                zero,
+                {x: 1, y: 0, z: 0},
+                0 as JointAxesMask,
+            ),
             target,
             body,
             true,
@@ -200,7 +205,13 @@ describe("GenericImpulseJoint motors in the built 3D WASM package", () => {
             const stiffness = 40;
             const damping = 12;
             joint.configureMotorModel(axis.axis, MotorModel.AccelerationBased);
-            joint.configureMotor(axis.axis, position, speed, stiffness, damping);
+            joint.configureMotor(
+                axis.axis,
+                position,
+                speed,
+                stiffness,
+                damping,
+            );
             joint.setMotorMaxForce(axis.axis, 100);
             step(body, 300);
             // The ordinary rigid-body path in joint_velocity_constraint.rs
@@ -301,7 +312,10 @@ describe("GenericImpulseJoint motors in the built 3D WASM package", () => {
         ({axis, component}) => {
             const {body, joint} = fixture({x: 1, y: 1, z: 1}, rotated);
             for (const other of linearAxes) {
-                joint.configureMotorModel(other.axis, MotorModel.AccelerationBased);
+                joint.configureMotorModel(
+                    other.axis,
+                    MotorModel.AccelerationBased,
+                );
                 joint.configureMotorPosition(other.axis, 0, 60, 16);
                 joint.setMotorMaxForce(other.axis, 100);
             }
