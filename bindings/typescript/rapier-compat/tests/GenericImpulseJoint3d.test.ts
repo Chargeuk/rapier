@@ -203,17 +203,15 @@ describe("GenericImpulseJoint motors in the built 3D WASM package", () => {
             joint.configureMotor(axis.axis, position, speed, stiffness, damping);
             joint.setMotorMaxForce(axis.axis, 100);
             step(body, 300);
-            // At rest, error * ERP = speed, with ERP = k / (h * k + d).
-            // Linear error is position - target; generic angular error is
-            // sin(angle / 2) - sin(target / 2), so invert that coordinate.
+            // The ordinary rigid-body path in joint_velocity_constraint.rs
+            // calls JointConstraintHelper.motor_angular in joint_constraint_helper.rs,
+            // which uses 2 * asin(imag) and full-radian angular error.
+            // motor_model.rs gives ERP = k / (h * k + d), so at rest
+            // position error = speed / ERP = d * speed / k + h * speed.
             // Omitting h * speed adds at most world.timestep * abs(speed)
-            // (0.005 here) in error coordinates, or < 0.011 radians after
-            // angular conversion. The existing 0.02 tolerance covers this
-            // substep bias while distinguishing both nonzero targets.
-            const offset = (damping * speed) / stiffness;
-            const equilibrium = axis.angular
-                ? 2 * Math.asin(Math.sin(position / 2) + offset)
-                : position + offset;
+            // (0.005 here). The existing 0.02 tolerance covers this substep
+            // bias while distinguishing both nonzero targets on every axis.
+            const equilibrium = position + (damping * speed) / stiffness;
             expect(Math.abs(coordinate(body, axis) - equilibrium)).toBeLessThan(
                 0.02,
             );
