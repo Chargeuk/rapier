@@ -1,9 +1,13 @@
 // Copied into the packed-package consumer by package-contract.cjs.
 import {
     ColliderDesc,
+    GenericImpulseJoint,
     init,
     InteractionGroups32,
+    JointAxesMask,
+    JointAxis,
     JointData,
+    MotorModel,
     RevoluteImpulseJoint,
     RigidBodyDesc,
     World,
@@ -84,6 +88,62 @@ async function consumer() {
             {x: 1, y: 0, z: 0},
             {x: 0, y: 1, z: 0},
         );
+        const generic = world.createImpulseJoint(
+            JointData.generic(
+                anchor,
+                anchor,
+                {x: 1, y: 0, z: 0},
+                0 as JointAxesMask,
+            ),
+            body1,
+            body2,
+            true,
+        ) as GenericImpulseJoint;
+        for (const axis of [
+            JointAxis.LinX,
+            JointAxis.LinY,
+            JointAxis.LinZ,
+            JointAxis.AngX,
+            JointAxis.AngY,
+            JointAxis.AngZ,
+        ]) {
+            const modelResult: void = generic.configureMotorModel(
+                axis,
+                MotorModel.AccelerationBased,
+            );
+            const velocityResult: void = generic.configureMotorVelocity(
+                axis,
+                0.2,
+                12,
+            );
+            const positionResult: void = generic.configureMotorPosition(
+                axis,
+                0.3,
+                100,
+                20,
+            );
+            const combinedResult: void = generic.configureMotor(
+                axis,
+                0.3,
+                0.2,
+                100,
+                20,
+            );
+            const forceResult: void = generic.setMotorMaxForce(axis, 5);
+            void [
+                modelResult,
+                velocityResult,
+                positionResult,
+                combinedResult,
+                forceResult,
+            ];
+        }
+        // @ts-expect-error Joint axes are typed enum values, not names.
+        generic.configureMotorPosition("LinX", 0, 100, 20);
+        // @ts-expect-error Each model configuration requires an axis and a model.
+        generic.configureMotorModel(MotorModel.AccelerationBased);
+        // @ts-expect-error The force/torque cap is numeric.
+        generic.setMotorMaxForce(JointAxis.LinX, "5");
         world.step();
     } finally {
         world.free();

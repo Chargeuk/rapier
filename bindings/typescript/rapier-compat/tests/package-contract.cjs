@@ -49,6 +49,91 @@ function assertSphericalMotorContract(R) {
     }
 }
 
+function assertGenericMotorContract(R) {
+    const world = new R.World({x: 0, y: 0, z: 0});
+    try {
+        const rotation = {x: 0.3, y: -0.4, z: 0.5, w: Math.sqrt(0.5)};
+        const target = world.createRigidBody(
+            R.RigidBodyDesc.kinematicPositionBased(),
+        );
+        const body = world.createRigidBody(
+            R.RigidBodyDesc.dynamic().setCanSleep(false).setRotation(rotation),
+        );
+        world.createCollider(R.ColliderDesc.ball(0.5).setMass(1), body);
+        const anchor = {x: 0, y: 0, z: 0};
+        const joint = world.createImpulseJoint(
+            R.JointData.generic(anchor, anchor, {x: 1, y: 0, z: 0}, 0),
+            target,
+            body,
+            true,
+        );
+        assert(joint instanceof R.GenericImpulseJoint);
+        assert.equal(joint.type(), R.JointType.Generic);
+        assert.equal(target.numColliders(), 0);
+        for (const method of [
+            "configureMotorModel",
+            "configureMotorVelocity",
+            "configureMotorPosition",
+            "configureMotor",
+            "setMotorMaxForce",
+        ]) {
+            assert.equal(
+                typeof joint[method],
+                "function",
+                `missing generic method: ${method}`,
+            );
+        }
+        joint.setLocalFrame1(anchor, {x: 0, y: 0, z: 0, w: 1});
+        joint.setLocalFrame2(anchor, {
+            x: -rotation.x,
+            y: -rotation.y,
+            z: -rotation.z,
+            w: rotation.w,
+        });
+        const axes = [R.JointAxis.LinX, R.JointAxis.LinY, R.JointAxis.LinZ];
+        const components = ["x", "y", "z"];
+        const speeds = [0.4, -0.3, 0.2];
+        axes.forEach((axis, i) => {
+            joint.configureMotorModel(axis, R.MotorModel.AccelerationBased);
+            joint.configureMotorVelocity(axis, speeds[i], 10);
+            joint.setMotorMaxForce(axis, 40);
+        });
+        for (let i = 0; i < 60; i += 1) world.step();
+        components.forEach((component, i) => {
+            assert(Math.abs(body.linvel()[component] - speeds[i]) < 0.01);
+        });
+        axes.forEach((axis) => joint.configureMotor(axis, 0, 0, 80, 18));
+        for (let i = 0; i < 300; i += 1) world.step();
+        const p = body.translation();
+        assert(
+            Math.hypot(p.x, p.y, p.z) < 0.005,
+            "generic combined motors must return to target",
+        );
+        const goal = {x: 0.3, y: -0.2, z: 0.4};
+        target.setNextKinematicTranslation(goal);
+        axes.forEach((axis) => joint.configureMotorPosition(axis, 0, 120, 24));
+        for (let i = 0; i < 300; i += 1) world.step();
+        components.forEach((component) => {
+            assert(
+                Math.abs(body.translation()[component] - goal[component]) < 0.005,
+            );
+            assert(Math.abs(body.linvel()[component]) < 0.005);
+        });
+        const q = body.rotation();
+        const dot =
+            q.x * rotation.x +
+            q.y * rotation.y +
+            q.z * rotation.z +
+            q.w * rotation.w;
+        assert(
+            Math.abs(Math.abs(dot) - 1) < 0.00001,
+            "linear motors must preserve rotation",
+        );
+    } finally {
+        world.free();
+    }
+}
+
 async function main() {
     const pkg = path.resolve(__dirname, "../builds/3d/pkg");
     const artifacts = fs.mkdtempSync(
@@ -78,7 +163,7 @@ async function main() {
         ),
     );
     assert.equal(pack.name, "@chargeuk/rapier3d-compat");
-    assert.equal(pack.version, "0.21.0-chargeuk.3");
+    assert.equal(pack.version, "0.21.0-chargeuk.4");
     assert.equal(pack.integrity, dry.integrity);
     for (const file of [
         "package.json",
@@ -164,11 +249,13 @@ async function main() {
     await cjsInitialization;
     assert.equal(cjs.version(), "0.21.0"); // Internal binding version is unchanged.
     assertSphericalMotorContract(cjs);
+    assertGenericMotorContract(cjs);
     for (const name of [
         "World",
         "ColliderDesc",
         "Collider",
         "JointData",
+        "GenericImpulseJoint",
         "RevoluteImpulseJoint",
     ]) {
         assert.equal(typeof cjs[name], "function", `missing export: ${name}`);
@@ -203,8 +290,11 @@ async function main() {
         assert.equal(Web.World, webModule.World);
         assert.deepEqual(Object.keys(Web).sort(), Object.keys(R.default).sort());
         ${assertSphericalMotorContract.toString()}
+        ${assertGenericMotorContract.toString()}
         assertSphericalMotorContract(R);
         assertSphericalMotorContract(Web);
+        assertGenericMotorContract(R);
+        assertGenericMotorContract(Web);
         const world = new R.World({x: 0, y: 0, z: 0});
         try {
             const collider = world.createCollider(R.ColliderDesc.ball(1).setBelongsToGrouping(7));
@@ -258,6 +348,7 @@ async function main() {
                 "CJS",
                 "ESM",
                 "spherical-wrapper-and-three-axis-motors-CJS-ESM-web",
+                "generic-wrapper-and-world-axis-motors-CJS-ESM-web",
                 "web-loading",
                 "TypeScript-root-and-web",
             ],

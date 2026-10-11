@@ -419,7 +419,110 @@ export class RevoluteImpulseJoint extends UnitImpulseJoint {
 }
 
 // #if DIM3
-export class GenericImpulseJoint extends ImpulseJoint {}
+export class GenericImpulseJoint extends ImpulseJoint {
+    /**
+     * Sets the motor model of one of this joint's axes.
+     *
+     * @param axis - The linear or angular joint-frame axis to configure.
+     * @param model - The motor model to apply to that axis.
+     */
+    public configureMotorModel(axis: JointAxis, model: MotorModel) {
+        this.rawSet.jointConfigureMotorModel(
+            this.handle,
+            axis as number as RawJointAxis,
+            model as number as RawMotorModel,
+        );
+    }
+
+    /**
+     * Sets the maximum force/torque the motor of the given axis can deliver.
+     *
+     * @param axis - The linear or angular joint-frame axis to configure.
+     * @param maxForce - The maximum force in newtons (N) for a linear axis, or
+     *                   torque in newton-metres (Nm) for an angular axis.
+     */
+    public setMotorMaxForce(axis: JointAxis, maxForce: number) {
+        this.rawSet.jointSetMotorMaxForce(
+            this.handle,
+            axis as number as RawJointAxis,
+            maxForce,
+        );
+    }
+
+    /**
+     * Makes the motor of the given axis target a specific velocity.
+     *
+     * @param axis - The linear or angular joint-frame axis to configure.
+     * @param targetVel - The target velocity in metres per second for a linear
+     *                    axis, or radians per second for an angular axis.
+     * @param factor - The strength used to reach the target velocity (a damping coefficient).
+     */
+    public configureMotorVelocity(
+        axis: JointAxis,
+        targetVel: number,
+        factor: number,
+    ) {
+        this.rawSet.jointConfigureMotorVelocity(
+            this.handle,
+            axis as number as RawJointAxis,
+            targetVel,
+            factor,
+        );
+    }
+
+    /**
+     * Makes the motor of the given axis target a specific position or angle.
+     *
+     * @param axis - The linear or angular joint-frame axis to configure.
+     * @param targetPos - The target position in metres for a linear axis, or
+     *                    angle in radians for an angular axis.
+     * @param stiffness - The spring-like stiffness used to reach the target.
+     * @param damping - The damping applied to the axis' velocity.
+     */
+    public configureMotorPosition(
+        axis: JointAxis,
+        targetPos: number,
+        stiffness: number,
+        damping: number,
+    ) {
+        this.rawSet.jointConfigureMotorPosition(
+            this.handle,
+            axis as number as RawJointAxis,
+            targetPos,
+            stiffness,
+            damping,
+        );
+    }
+
+    /**
+     * Configures the motor of the given axis with both a position/angle and a
+     * velocity target.
+     *
+     * @param axis - The linear or angular joint-frame axis to configure.
+     * @param targetPos - The target position in metres for a linear axis, or
+     *                    angle in radians for an angular axis.
+     * @param targetVel - The target velocity in metres per second for a linear
+     *                    axis, or radians per second for an angular axis.
+     * @param stiffness - The spring-like stiffness used to reach the target.
+     * @param damping - The damping applied to the axis' velocity.
+     */
+    public configureMotor(
+        axis: JointAxis,
+        targetPos: number,
+        targetVel: number,
+        stiffness: number,
+        damping: number,
+    ) {
+        this.rawSet.jointConfigureMotor(
+            this.handle,
+            axis as number as RawJointAxis,
+            targetPos,
+            targetVel,
+            stiffness,
+            damping,
+        );
+    }
+}
 
 export class SphericalImpulseJoint extends ImpulseJoint {
     /**
