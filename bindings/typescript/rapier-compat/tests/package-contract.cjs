@@ -150,6 +150,40 @@ function assertGenericMotorContract(R) {
     }
 }
 
+function assertContactParameterContract(R) {
+    const world = new R.World({x: 0, y: 0, z: 0});
+    const other = new R.World({x: 0, y: 0, z: 0});
+    try {
+        const params = world.integrationParameters;
+        assert.equal(params.contactClustering, true);
+        assert.equal(params.contactRecycling, true);
+        assert(Math.abs(params.normalizedContactRecycleDistance - 0.05) < 1e-6);
+        const dt = params.dt;
+        for (const enabled of [false, true]) {
+            params.contactClustering = enabled;
+            params.contactRecycling = !enabled;
+            for (const distance of [0, 0.0125, 0.125]) {
+                params.normalizedContactRecycleDistance = distance;
+                world.step();
+                assert.equal(params.contactClustering, enabled);
+                assert.equal(params.raw.contactClustering, enabled);
+                assert.equal(params.contactRecycling, !enabled);
+                assert.equal(params.raw.contactRecycling, !enabled);
+                assert(Math.abs(params.normalizedContactRecycleDistance - distance) < 1e-6);
+                assert(Math.abs(params.raw.normalizedContactRecycleDistance - distance) < 1e-6);
+                assert.equal(params.dt, dt);
+            }
+        }
+        other.step();
+        assert.equal(other.integrationParameters.contactClustering, true);
+        assert.equal(other.integrationParameters.contactRecycling, true);
+        assert(Math.abs(other.integrationParameters.normalizedContactRecycleDistance - 0.05) < 1e-6);
+    } finally {
+        world.free();
+        other.free();
+    }
+}
+
 async function main() {
     const pkg = path.resolve(__dirname, "../builds/3d/pkg");
     const artifacts = fs.mkdtempSync(
@@ -179,7 +213,7 @@ async function main() {
         ),
     );
     assert.equal(pack.name, "@chargeuk/rapier3d-compat");
-    assert.equal(pack.version, "0.21.0-chargeuk.4");
+    assert.equal(pack.version, "0.21.0-chargeuk.5");
     assert.equal(pack.integrity, dry.integrity);
     for (const file of [
         "package.json",
@@ -266,6 +300,7 @@ async function main() {
     assert.equal(cjs.version(), "0.21.0"); // Internal binding version is unchanged.
     assertSphericalMotorContract(cjs);
     assertGenericMotorContract(cjs);
+    assertContactParameterContract(cjs);
     for (const name of [
         "World",
         "ColliderDesc",
@@ -307,10 +342,13 @@ async function main() {
         assert.deepEqual(Object.keys(Web).sort(), Object.keys(R.default).sort());
         ${assertSphericalMotorContract.toString()}
         ${assertGenericMotorContract.toString()}
+        ${assertContactParameterContract.toString()}
         assertSphericalMotorContract(R);
         assertSphericalMotorContract(Web);
         assertGenericMotorContract(R);
         assertGenericMotorContract(Web);
+        assertContactParameterContract(R);
+        assertContactParameterContract(Web);
         const world = new R.World({x: 0, y: 0, z: 0});
         try {
             const collider = world.createCollider(R.ColliderDesc.ball(1).setBelongsToGrouping(7));
@@ -365,6 +403,7 @@ async function main() {
                 "ESM",
                 "spherical-wrapper-and-three-axis-motors-CJS-ESM-web",
                 "generic-wrapper-and-world-axis-motors-CJS-ESM-web",
+                "contact-parameters-defaults-roundtrip-isolation-CJS-ESM-web",
                 "web-loading",
                 "TypeScript-root-and-web",
             ],

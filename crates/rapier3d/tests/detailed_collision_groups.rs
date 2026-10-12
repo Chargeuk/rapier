@@ -31,6 +31,56 @@ fn standard_modes_and_neutral_defaults() {
 }
 
 #[test]
+fn standard_and_or_modes_and_custom_masks_control_broad_phase_pair_creation() {
+    let a = InteractionGroups::new(Group::GROUP_1, Group::GROUP_2, InteractionTestMode::And);
+    let b = InteractionGroups::new(Group::GROUP_2, Group::NONE, InteractionTestMode::And);
+    let or_a = InteractionGroups {
+        test_mode: InteractionTestMode::Or,
+        ..a
+    };
+    let or_b = InteractionGroups {
+        test_mode: InteractionTestMode::Or,
+        ..b
+    };
+    let custom_a = InteractionGroups {
+        belongs_to_with_grouping: 1,
+        collides_with_with_grouping: 2,
+        belongs_to_grouping: 7,
+        ..or_a
+    };
+    let custom_b = InteractionGroups {
+        belongs_to_with_grouping: 2,
+        collides_with_with_grouping: 0,
+        belongs_to_grouping: 7,
+        ..or_b
+    };
+    for (first, second, allowed) in [
+        (a, b, false),
+        (or_a, b, false), // And wins mixed modes, in either handle order.
+        (b, or_a, false),
+        (or_a, or_b, true),
+        (or_b, or_a, true),
+        (custom_a, custom_b, false), // Or cannot bypass matching-group custom masks.
+        (
+            custom_a,
+            InteractionGroups {
+                belongs_to_grouping: 8,
+                ..custom_b
+            },
+            true,
+        ),
+    ] {
+        let (mut world, a, b) = overlapping(false, first, second);
+        world.step();
+        assert_eq!(
+            world.narrow_phase.contact_pairs().count(),
+            usize::from(allowed)
+        );
+        assert_eq!(interacting(&world, a, b, false), allowed);
+    }
+}
+
+#[test]
 fn custom_masks_are_bilateral_only_within_a_grouping() {
     let a = detailed(1, 2, 7);
     let b = detailed(2, 1, 7);

@@ -519,6 +519,57 @@ describe("Chargeuk 3D compatibility behaviour", () => {
         }
     });
 
+    test("contact parameters retain native defaults, round-trip through WASM, and stay world-local", () => {
+        const other = new World({x: 0, y: 0, z: 0});
+        try {
+            const params = world.integrationParameters;
+            const unrelated = () => [
+                params.dt,
+                params.lengthUnit,
+                params.warmstartJoints,
+                params.numSolverIterations,
+                params.numInternalPgsIterations,
+                params.normalizedAllowedLinearError,
+                params.normalizedPredictionDistance,
+            ];
+            const defaults = unrelated();
+            expect(params.contactClustering).toBe(true);
+            expect(params.contactRecycling).toBe(true);
+            expect(params.normalizedContactRecycleDistance).toBeCloseTo(0.05, 6);
+            for (const clustering of [false, true]) {
+                for (const recycling of [false, true]) {
+                    params.contactClustering = clustering;
+                    params.contactRecycling = recycling;
+                    for (const distance of [0, 0.0125, 0.125]) {
+                        params.normalizedContactRecycleDistance = distance;
+                        expect(params.raw.contactClustering).toBe(clustering);
+                        expect(params.raw.contactRecycling).toBe(recycling);
+                        expect(params.raw.normalizedContactRecycleDistance).toBeCloseTo(distance, 6);
+                        world.step();
+                        expect(params.contactClustering).toBe(clustering);
+                        expect(params.contactRecycling).toBe(recycling);
+                        expect(params.normalizedContactRecycleDistance).toBeCloseTo(distance, 6);
+                        expect(unrelated()).toEqual(defaults);
+                    }
+                }
+            }
+            // Raw writes must also reach the public getters; normalized distance is unscaled.
+            params.raw.contactClustering = false;
+            params.raw.contactRecycling = false;
+            params.raw.normalizedContactRecycleDistance = 0.125;
+            params.lengthUnit = 2;
+            expect(params.contactClustering).toBe(false);
+            expect(params.contactRecycling).toBe(false);
+            expect(params.normalizedContactRecycleDistance).toBe(0.125);
+            other.step();
+            expect(other.integrationParameters.contactClustering).toBe(true);
+            expect(other.integrationParameters.contactRecycling).toBe(true);
+            expect(other.integrationParameters.normalizedContactRecycleDistance).toBeCloseTo(0.05, 6);
+        } finally {
+            other.free();
+        }
+    });
+
     test.each([false, true])(
         "joint warm-start flag reaches native parameters and keeps motors finite through updates/teleports (%s)",
         (warmstart) => {

@@ -78,6 +78,33 @@ export class IntegrationParameters {
         this.raw.warmstartJoints = value;
     }
 
+    /** Merge contact manifolds sharing nearly the same normal before solving (native default: true, 3D only). */
+    get contactClustering(): boolean {
+        return this.raw.contactClustering;
+    }
+
+    set contactClustering(value: boolean) {
+        this.raw.contactClustering = value;
+    }
+
+    /** Reuse contacts when relative pose drift is below the recycle distance (native default: true). */
+    get contactRecycling(): boolean {
+        return this.raw.contactRecycling;
+    }
+
+    set contactRecycling(value: boolean) {
+        this.raw.contactRecycling = value;
+    }
+
+    /** Maximum relative pose drift for contact recycling, multiplied by lengthUnit (native default: 0.05). */
+    get normalizedContactRecycleDistance(): number {
+        return this.raw.normalizedContactRecycleDistance;
+    }
+
+    set normalizedContactRecycleDistance(value: number) {
+        this.raw.normalizedContactRecycleDistance = value;
+    }
+
     /**
      * Maximum number of substeps performed by the  solver (default: `1`).
      */

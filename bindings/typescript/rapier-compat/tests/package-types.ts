@@ -65,6 +65,35 @@ async function consumer() {
         world.integrationParameters.warmstartJoints = true;
         const warmstart: boolean = world.integrationParameters.warmstartJoints;
         void warmstart;
+        world.integrationParameters.contactClustering = false;
+        world.integrationParameters.contactRecycling = true;
+        world.integrationParameters.normalizedContactRecycleDistance = 0.0125;
+        const contactClustering: boolean =
+            world.integrationParameters.contactClustering;
+        const contactRecycling: boolean =
+            world.integrationParameters.contactRecycling;
+        const recycleDistance: number =
+            world.integrationParameters.normalizedContactRecycleDistance;
+        const rawClustering: boolean =
+            world.integrationParameters.raw.contactClustering;
+        const rawRecycling: boolean =
+            world.integrationParameters.raw.contactRecycling;
+        const rawRecycleDistance: number =
+            world.integrationParameters.raw.normalizedContactRecycleDistance;
+        // @ts-expect-error Contact flags require booleans.
+        world.integrationParameters.contactClustering = 1;
+        // @ts-expect-error Contact flags require booleans.
+        world.integrationParameters.contactRecycling = 0;
+        // @ts-expect-error Normalized distance requires a number.
+        world.integrationParameters.normalizedContactRecycleDistance = "0.05";
+        void [
+            contactClustering,
+            contactRecycling,
+            recycleDistance,
+            rawClustering,
+            rawRecycling,
+            rawRecycleDistance,
+        ];
         collider.setRadius(0.4);
         collider.setHalfHeight(1);
         const body1 = world.createRigidBody(RigidBodyDesc.fixed());

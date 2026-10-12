@@ -53,6 +53,36 @@ impl RawIntegrationParameters {
     }
 
     #[wasm_bindgen(getter)]
+    pub fn contactClustering(&self) -> bool {
+        self.0.contact_clustering
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_contactClustering(&mut self, value: bool) {
+        self.0.contact_clustering = value;
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn contactRecycling(&self) -> bool {
+        self.0.contact_recycling
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_contactRecycling(&mut self, value: bool) {
+        self.0.contact_recycling = value;
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn normalizedContactRecycleDistance(&self) -> f32 {
+        self.0.normalized_contact_recycle_distance
+    }
+
+    #[wasm_bindgen(setter)]
+    pub fn set_normalizedContactRecycleDistance(&mut self, value: f32) {
+        self.0.normalized_contact_recycle_distance = value;
+    }
+
+    #[wasm_bindgen(getter)]
     pub fn maxCcdSubsteps(&self) -> usize {
         self.0.max_ccd_substeps
     }
@@ -175,6 +205,50 @@ impl RawIntegrationParameters {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contact_accessors_change_only_the_corresponding_native_fields() {
+        let mut raw = RawIntegrationParameters::new();
+        let defaults = raw.0;
+        assert!(raw.contactClustering());
+        assert!(raw.contactRecycling());
+        assert_eq!(raw.normalizedContactRecycleDistance(), 0.05);
+
+        raw.set_contactClustering(false);
+        assert!(!raw.contactClustering());
+        assert_eq!(
+            raw.0,
+            IntegrationParameters {
+                contact_clustering: false,
+                ..defaults
+            }
+        );
+        raw.set_contactClustering(true);
+        raw.set_contactRecycling(false);
+        assert!(!raw.contactRecycling());
+        assert_eq!(
+            raw.0,
+            IntegrationParameters {
+                contact_recycling: false,
+                ..defaults
+            }
+        );
+        raw.set_contactRecycling(true);
+        for distance in [0.0, 0.0125, 0.125] {
+            raw.set_normalizedContactRecycleDistance(distance);
+            assert_eq!(raw.normalizedContactRecycleDistance(), distance);
+            assert_eq!(
+                raw.0,
+                IntegrationParameters {
+                    normalized_contact_recycle_distance: distance,
+                    ..defaults
+                }
+            );
+        }
+        raw.set_normalizedContactRecycleDistance(0.05);
+        assert_eq!(raw.0, defaults);
+        assert_eq!(RawIntegrationParameters::new().0, defaults);
+    }
 
     #[test]
     fn joint_warmstart_accessor_changes_only_the_native_joint_flag() {

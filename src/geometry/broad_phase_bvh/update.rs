@@ -193,7 +193,8 @@ impl BroadPhaseBvh {
             // (its updates run concurrently), so this one must not either — a step that
             // mixes moved colliders with newly added ones would otherwise build a
             // different tree here than it does there.
-            let mut deferred_inserts: Vec<usize> = Vec::new();
+            let mut deferred_inserts = core::mem::take(&mut self.deferred_inserts_workspace);
+            deferred_inserts.clear();
             for (i, (modified, aabb, change_detection_skin)) in update_workspace.iter().enumerate()
             {
                 let leaf_index = modified.into_raw_parts().0;
@@ -235,7 +236,7 @@ impl BroadPhaseBvh {
             // Pass 2: the structural insertions, in `update_workspace` order. Fresh
             // insertions pick their spot by SAH descent, so they never count toward the
             // optimizer's debt, and their status is always `Inserted`.
-            for i in deferred_inserts {
+            for i in deferred_inserts.drain(..) {
                 let (modified, aabb, change_detection_skin) = &update_workspace[i];
                 let leaf_index = modified.into_raw_parts().0;
                 let status =
@@ -245,6 +246,7 @@ impl BroadPhaseBvh {
                 self.updated_colliders.push(*modified);
                 self.curr_updated_leaves.push(leaf_index);
             }
+            self.deferred_inserts_workspace = deferred_inserts;
         }
 
         self.update_workspace = update_workspace;
@@ -312,27 +314,11 @@ impl BroadPhaseBvh {
         // with an integer compare) cannot run concurrently, and its map writes are part of
         // the serialized broad-phase state: keeping it would make the two builds' snapshots
         // differ even on an identical simulation.
-        #[cfg(feature = "parallel")]
-        let candidates = self
-            .tree
-            .traverse_bvtt_single_tree_parallel::<{ Self::CHANGE_DETECTION_ENABLED }>();
-
-        #[cfg(not(feature = "parallel"))]
-        let candidates = {
-            // Reused across steps: the sequential walk reports through a closure, so
-            // collecting it into the same shape the parallel walk returns costs nothing
-            // beyond the (amortized) buffer.
-            let mut candidates = core::mem::take(&mut self.candidates_workspace);
-            candidates.clear();
-            self.tree
-                .traverse_bvtt_single_tree::<{ Self::CHANGE_DETECTION_ENABLED }>(
-                    &mut self.workspace,
-                    &mut |co1, co2| candidates.push((co1, co2)),
-                );
-            candidates
-        };
+        let mut new_pairs = core::mem::take(&mut self.candidates_workspace);
+        new_pairs.clear();
 
         {
+            let pairs = &self.pairs;
             let filter_new =
                 |&(co1, co2): &(u32, u32)| -> Option<(ColliderHandle, ColliderHandle)> {
                     debug_assert_ne!(co1, co2);
@@ -356,7 +342,7 @@ impl BroadPhaseBvh {
                         }
                     }
 
-                    if self.pairs.contains_key(&(handle1, handle2)) {
+                    if pairs.contains_key(&(handle1, handle2)) {
                         return None;
                     }
 
@@ -398,41 +384,46 @@ impl BroadPhaseBvh {
                     Some((handle1, handle2))
                 };
 
-            // rayon's ordered collect keeps the new pairs in traversal order, so the pair
-            // set, adjacency lists and emitted events stay deterministic — and identical to
-            // the sequential filter below.
-            // TODO(perf): avoid systematic `Vec` allocation.
+            // Ordered parallel extension preserves traversal order and reuses the accepted
+            // buffer. Parry's parallel traversal still owns its raw candidate vector.
             #[cfg(feature = "parallel")]
-            let new_pairs: Vec<(ColliderHandle, ColliderHandle)> = {
+            {
                 use rayon::prelude::*;
-                candidates
-                    .par_chunks(512)
-                    .flat_map_iter(|chunk| chunk.iter().filter_map(filter_new))
-                    .collect()
-            };
-            #[cfg(not(feature = "parallel"))]
-            let new_pairs: Vec<(ColliderHandle, ColliderHandle)> =
-                candidates.iter().filter_map(filter_new).collect();
-
-            for (handle1, handle2) in new_pairs {
-                let prev = self.pairs.insert((handle1, handle2), self.frame_index);
-                debug_assert!(prev.is_none());
-                self.pair_adjacency
-                    .ensure_element_exist(handle1.0, Vec::new())
-                    .push(handle2);
-                self.pair_adjacency
-                    .ensure_element_exist(handle2.0, Vec::new())
-                    .push(handle1);
-                events.push(BroadPhasePairEvent::AddPair(ColliderPair::new(
-                    handle1, handle2,
-                )));
+                let candidates = self
+                    .tree
+                    .traverse_bvtt_single_tree_parallel::<{ Self::CHANGE_DETECTION_ENABLED }>();
+                new_pairs.par_extend(
+                    candidates
+                        .par_chunks(512)
+                        .flat_map_iter(|chunk| chunk.iter().filter_map(filter_new)),
+                );
             }
+            #[cfg(not(feature = "parallel"))]
+            self.tree
+                .traverse_bvtt_single_tree::<{ Self::CHANGE_DETECTION_ENABLED }>(
+                    &mut self.workspace,
+                    &mut |co1, co2| {
+                        if let Some(pair) = filter_new(&(co1, co2)) {
+                            new_pairs.push(pair);
+                        }
+                    },
+                );
         }
 
-        #[cfg(not(feature = "parallel"))]
-        {
-            self.candidates_workspace = candidates;
+        for (handle1, handle2) in new_pairs.drain(..) {
+            let prev = self.pairs.insert((handle1, handle2), self.frame_index);
+            debug_assert!(prev.is_none());
+            self.pair_adjacency
+                .ensure_element_exist(handle1.0, Vec::new())
+                .push(handle2);
+            self.pair_adjacency
+                .ensure_element_exist(handle2.0, Vec::new())
+                .push(handle1);
+            events.push(BroadPhasePairEvent::AddPair(ColliderPair::new(
+                handle1, handle2,
+            )));
         }
+        self.candidates_workspace = new_pairs;
 
         /*
          *
@@ -602,5 +593,209 @@ impl BroadPhaseBvh {
                 }
             }
         }
+    }
+}
+
+#[cfg(all(test, feature = "dim3"))]
+mod tests {
+    use super::*;
+    use crate::dynamics::RigidBodyBuilder;
+    use crate::geometry::{ActiveCollisionTypes, ColliderBuilder, InteractionGroups};
+    use crate::math::Vector;
+    use parry::partitioning::BvhWorkspace;
+
+    fn added_pairs(events: &[BroadPhasePairEvent]) -> Vec<(ColliderHandle, ColliderHandle)> {
+        events
+            .iter()
+            .map(|event| match event {
+                BroadPhasePairEvent::AddPair(pair) => (pair.collider1, pair.collider2),
+                BroadPhasePairEvent::DeletePair(_) => panic!("unexpected deletion"),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn accepted_collection_preserves_traversal_order_and_existing_pair_timestamps() {
+        let mut colliders = ColliderSet::new();
+        let mut bodies = RigidBodySet::new();
+        let parent = bodies.insert(RigidBodyBuilder::fixed());
+        let mut handles = Vec::new();
+        for i in 0..70 {
+            let groups = InteractionGroups {
+                belongs_to_with_grouping: 1 << (i % 2),
+                collides_with_with_grouping: 1,
+                belongs_to_grouping: 7,
+                ..InteractionGroups::all()
+            };
+            let builder = ColliderBuilder::ball(1.0)
+                .active_collision_types(if i % 3 == 0 {
+                    ActiveCollisionTypes::default()
+                } else {
+                    ActiveCollisionTypes::all()
+                })
+                .collision_groups(groups);
+            handles.push(if i < 3 {
+                colliders.insert_with_parent(builder, parent, &mut bodies)
+            } else {
+                colliders.insert(builder)
+            });
+        }
+        let mut broad = BroadPhaseBvh::new();
+        let params = IntegrationParameters::default();
+        let mut events = Vec::new();
+        broad.update(&params, &colliders, &bodies, &handles, &[], &mut events);
+
+        // Reference the previous collect-then-filter path on the exact same tree.
+        let mut raw = Vec::new();
+        broad
+            .tree
+            .traverse_bvtt_single_tree::<{ BroadPhaseBvh::CHANGE_DETECTION_ENABLED }>(
+                &mut BvhWorkspace::default(),
+                &mut |a, b| raw.push((a, b)),
+            );
+        #[cfg(feature = "parallel")]
+        assert_eq!(
+            raw,
+            broad
+                .tree
+                .traverse_bvtt_single_tree_parallel::<{ BroadPhaseBvh::CHANGE_DETECTION_ENABLED }>()
+        );
+        let expected: Vec<_> = raw
+            .into_iter()
+            .filter_map(|(a, b)| {
+                let (a, b) = (a.min(b), a.max(b));
+                let (co1, h1) = colliders.get_unknown_gen(a).unwrap();
+                let (co2, h2) = colliders.get_unknown_gen(b).unwrap();
+                let same_parent = co1.parent().is_some() && co1.parent() == co2.parent();
+                let active = co1
+                    .active_collision_types()
+                    .test(RigidBodyType::Fixed, RigidBodyType::Fixed)
+                    || co2
+                        .active_collision_types()
+                        .test(RigidBodyType::Fixed, RigidBodyType::Fixed);
+                (!same_parent && active && co1.collision_groups().test(co2.collision_groups()))
+                    .then_some((h1, h2))
+            })
+            .collect();
+        assert!(expected.len() > 512); // Exercise ordered filtering across parallel chunks.
+        assert_eq!(added_pairs(&events), expected);
+        assert_eq!(broad.pairs.len(), expected.len()); // No duplicate pairs/events.
+        for &(a, b) in &expected {
+            assert_eq!(
+                broad.pair_adjacency.get(a.0).unwrap().iter().filter(|&&h| h == b).count(),
+                1
+            );
+            assert_eq!(
+                broad.pair_adjacency.get(b.0).unwrap().iter().filter(|&&h| h == a).count(),
+                1
+            );
+        }
+        let timestamps = broad.pairs.clone();
+        #[cfg(all(feature = "serde-serialize", feature = "enhanced-determinism"))]
+        let mut restored: BroadPhaseBvh = {
+            let bytes = bincode::serialize(&broad).unwrap();
+            let restored: BroadPhaseBvh = bincode::deserialize(&bytes).unwrap();
+            assert_eq!(restored.candidates_workspace.capacity(), 0);
+            assert_eq!(restored.deferred_inserts_workspace.capacity(), 0);
+            restored
+        };
+        events.clear();
+        // Forced reinsertion must not re-emit existing pairs or refresh timestamps.
+        broad.update(&params, &colliders, &bodies, &handles, &[], &mut events);
+        assert!(events.is_empty());
+        assert_eq!(broad.pairs, timestamps);
+        #[cfg(all(feature = "serde-serialize", feature = "enhanced-determinism"))]
+        {
+            restored.update(&params, &colliders, &bodies, &handles, &[], &mut events);
+            assert!(events.is_empty());
+            assert_eq!(
+                bincode::serialize(&broad).unwrap(),
+                bincode::serialize(&restored).unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn accepted_and_deferred_buffers_are_reused_after_separation_and_rediscovery() {
+        let mut colliders = ColliderSet::new();
+        let bodies = RigidBodySet::new();
+        let handles: Vec<_> = (0..16)
+            .map(|_| {
+                colliders.insert(
+                    ColliderBuilder::ball(1.0).active_collision_types(ActiveCollisionTypes::all()),
+                )
+            })
+            .collect();
+        let params = IntegrationParameters::default();
+        let mut broad = BroadPhaseBvh::new();
+        let mut events = Vec::new();
+        broad.update(&params, &colliders, &bodies, &handles, &[], &mut events);
+        assert_eq!(added_pairs(&events).len(), 120);
+        let accepted_storage = (
+            broad.candidates_workspace.as_ptr(),
+            broad.candidates_workspace.capacity(),
+        );
+        #[cfg(not(feature = "parallel"))]
+        let deferred_storage = (
+            broad.deferred_inserts_workspace.as_ptr(),
+            broad.deferred_inserts_workspace.capacity(),
+        );
+
+        for (i, &h) in handles.iter().enumerate() {
+            colliders[h].set_translation(Vector::new(i as Real * 10.0, 0.0, 0.0));
+        }
+        events.clear();
+        broad.update(&params, &colliders, &bodies, &handles, &[], &mut events);
+        assert_eq!(events.len(), 120);
+        assert!(events.iter().all(|e| matches!(e, BroadPhasePairEvent::DeletePair(_))));
+        assert!(broad.pairs.is_empty());
+        for &h in &handles {
+            colliders[h].set_translation(Vector::ZERO);
+        }
+        events.clear();
+        broad.update(&params, &colliders, &bodies, &handles, &[], &mut events);
+        assert_eq!(added_pairs(&events).len(), 120);
+        assert!(broad.candidates_workspace.is_empty());
+        assert_eq!(
+            (
+                broad.candidates_workspace.as_ptr(),
+                broad.candidates_workspace.capacity(),
+            ),
+            accepted_storage
+        );
+        #[cfg(not(feature = "parallel"))]
+        {
+            assert!(broad.deferred_inserts_workspace.is_empty());
+            assert_eq!(
+                (
+                    broad.deferred_inserts_workspace.as_ptr(),
+                    broad.deferred_inserts_workspace.capacity(),
+                ),
+                deferred_storage
+            );
+        }
+    }
+
+    #[test]
+    fn dense_same_parent_candidates_never_allocate_accepted_storage() {
+        let mut colliders = ColliderSet::new();
+        let mut bodies = RigidBodySet::new();
+        let parent = bodies.insert(RigidBodyBuilder::dynamic());
+        let handles: Vec<_> = (0..32)
+            .map(|_| colliders.insert_with_parent(ColliderBuilder::ball(1.0), parent, &mut bodies))
+            .collect();
+        let mut broad = BroadPhaseBvh::new();
+        let mut events = Vec::new();
+        broad.update(
+            &IntegrationParameters::default(),
+            &colliders,
+            &bodies,
+            &handles,
+            &[],
+            &mut events,
+        );
+        assert!(events.is_empty());
+        assert!(broad.pairs.is_empty());
+        assert_eq!(broad.candidates_workspace.capacity(), 0);
     }
 }

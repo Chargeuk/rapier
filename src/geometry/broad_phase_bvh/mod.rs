@@ -40,12 +40,12 @@ pub struct BroadPhaseBvh {
     /// during the last `update` call.
     #[cfg_attr(feature = "serde-serialize", serde(skip))]
     updated_colliders: Vec<ColliderHandle>,
-    /// Workspace buffer holding the leaf pairs reported by the tree traversal. Only the
-    /// sequential traversal needs it (it reports through a closure); the parallel one
-    /// returns its own vector.
-    #[cfg(not(feature = "parallel"))]
+    /// Workspace buffer holding only eligible new pairs, in tree traversal order.
     #[cfg_attr(feature = "serde-serialize", serde(skip))]
-    candidates_workspace: Vec<(u32, u32)>,
+    candidates_workspace: Vec<(ColliderHandle, ColliderHandle)>,
+    /// Leaf updates deferred until all existing leaves have been updated.
+    #[cfg_attr(feature = "serde-serialize", serde(skip))]
+    deferred_inserts_workspace: Vec<usize>,
     /// Workspace: per-collider "was updated this step" bit (collider arena index), so the
     /// stale-pair scan can visit a pair from one side only when both sides moved.
     #[cfg_attr(feature = "serde-serialize", serde(skip))]

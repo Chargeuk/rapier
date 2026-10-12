@@ -23,6 +23,35 @@ const collider = world.createCollider(
     ColliderDesc.ball(1).setBelongsToGrouping(7),
 );
 collider.setDetailedCollisionGroups(0xffff_ffff, 1, 2, 7);
+world.integrationParameters.contactClustering = false;
+world.integrationParameters.contactRecycling = true;
+world.integrationParameters.normalizedContactRecycleDistance = 0.0125;
+const contactClustering: boolean =
+    world.integrationParameters.contactClustering;
+const contactRecycling: boolean =
+    world.integrationParameters.contactRecycling;
+const recycleDistance: number =
+    world.integrationParameters.normalizedContactRecycleDistance;
+const rawClustering: boolean =
+    world.integrationParameters.raw.contactClustering;
+const rawRecycling: boolean =
+    world.integrationParameters.raw.contactRecycling;
+const rawRecycleDistance: number =
+    world.integrationParameters.raw.normalizedContactRecycleDistance;
+// @ts-expect-error Contact flags require booleans.
+world.integrationParameters.contactClustering = 1;
+// @ts-expect-error Contact flags require booleans.
+world.integrationParameters.contactRecycling = 0;
+// @ts-expect-error Normalized distance requires a number.
+world.integrationParameters.normalizedContactRecycleDistance = "0.05";
+void [
+    contactClustering,
+    contactRecycling,
+    recycleDistance,
+    rawClustering,
+    rawRecycling,
+    rawRecycleDistance,
+];
 const anchor = {x: 0, y: 0, z: 0};
 const target = world.createRigidBody(RigidBodyDesc.kinematicPositionBased());
 const body = world.createRigidBody(RigidBodyDesc.dynamic());
