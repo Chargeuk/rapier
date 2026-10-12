@@ -31,7 +31,11 @@ use rapier3d::prelude::*;
 /// Snapshot size in bytes, and its FNV-1a digest. Both, because the size alone localizes a
 /// failure: a differing size means a container's *encoding* changed, an equal size with a
 /// differing digest means the values did.
-const GOLDEN: (usize, u64) = (488_334, 0x3f5e_ac53_ad07_5243);
+// Chargeuk serializes three custom u32 fields in both group records per collider:
+// 121 colliders * 2 records * 12 bytes adds 2,904 bytes to the upstream fixture.
+// Pre-Task 41 and current native snapshots match; verify this golden on 64-bit
+// and wasm32-wasip1 before accepting cross-target portability.
+const GOLDEN: (usize, u64) = (491_238, 0x281c_1af2_a04b_827b);
 
 const STEPS: usize = 60;
 
