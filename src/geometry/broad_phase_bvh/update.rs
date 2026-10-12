@@ -658,7 +658,8 @@ mod tests {
             raw,
             broad
                 .tree
-                .traverse_bvtt_single_tree_parallel::<{ BroadPhaseBvh::CHANGE_DETECTION_ENABLED }>()
+                .traverse_bvtt_single_tree_parallel::<{ BroadPhaseBvh::CHANGE_DETECTION_ENABLED }>(
+                )
         );
         let expected: Vec<_> = raw
             .into_iter()
@@ -682,11 +683,23 @@ mod tests {
         assert_eq!(broad.pairs.len(), expected.len()); // No duplicate pairs/events.
         for &(a, b) in &expected {
             assert_eq!(
-                broad.pair_adjacency.get(a.0).unwrap().iter().filter(|&&h| h == b).count(),
+                broad
+                    .pair_adjacency
+                    .get(a.0)
+                    .unwrap()
+                    .iter()
+                    .filter(|&&h| h == b)
+                    .count(),
                 1
             );
             assert_eq!(
-                broad.pair_adjacency.get(b.0).unwrap().iter().filter(|&&h| h == a).count(),
+                broad
+                    .pair_adjacency
+                    .get(b.0)
+                    .unwrap()
+                    .iter()
+                    .filter(|&&h| h == a)
+                    .count(),
                 1
             );
         }
@@ -747,7 +760,11 @@ mod tests {
         events.clear();
         broad.update(&params, &colliders, &bodies, &handles, &[], &mut events);
         assert_eq!(events.len(), 120);
-        assert!(events.iter().all(|e| matches!(e, BroadPhasePairEvent::DeletePair(_))));
+        assert!(
+            events
+                .iter()
+                .all(|e| matches!(e, BroadPhasePairEvent::DeletePair(_)))
+        );
         assert!(broad.pairs.is_empty());
         for &h in &handles {
             colliders[h].set_translation(Vector::ZERO);

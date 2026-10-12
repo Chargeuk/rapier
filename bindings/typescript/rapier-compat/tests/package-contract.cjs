@@ -169,15 +169,28 @@ function assertContactParameterContract(R) {
                 assert.equal(params.raw.contactClustering, enabled);
                 assert.equal(params.contactRecycling, !enabled);
                 assert.equal(params.raw.contactRecycling, !enabled);
-                assert(Math.abs(params.normalizedContactRecycleDistance - distance) < 1e-6);
-                assert(Math.abs(params.raw.normalizedContactRecycleDistance - distance) < 1e-6);
+                assert(
+                    Math.abs(
+                        params.normalizedContactRecycleDistance - distance,
+                    ) < 1e-6,
+                );
+                assert(
+                    Math.abs(
+                        params.raw.normalizedContactRecycleDistance - distance,
+                    ) < 1e-6,
+                );
                 assert.equal(params.dt, dt);
             }
         }
         other.step();
         assert.equal(other.integrationParameters.contactClustering, true);
         assert.equal(other.integrationParameters.contactRecycling, true);
-        assert(Math.abs(other.integrationParameters.normalizedContactRecycleDistance - 0.05) < 1e-6);
+        assert(
+            Math.abs(
+                other.integrationParameters.normalizedContactRecycleDistance -
+                    0.05,
+            ) < 1e-6,
+        );
     } finally {
         world.free();
         other.free();

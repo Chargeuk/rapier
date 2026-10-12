@@ -153,31 +153,40 @@ fn same_parent_pairs_rediscover_after_reparenting() {
         .colliders
         .set_parent(b, Some(second_body), &mut world.bodies);
     world.step();
-    assert!(world
-        .narrow_phase
-        .contact_pair(a, b)
-        .unwrap()
-        .has_any_active_contact());
+    assert!(
+        world
+            .narrow_phase
+            .contact_pair(a, b)
+            .unwrap()
+            .has_any_active_contact()
+    );
     world
         .colliders
         .set_parent(b, Some(first_body), &mut world.bodies);
     world.step();
-    assert!(world
-        .narrow_phase
-        .contact_pair(a, b)
-        .is_none_or(|p| !p.has_any_active_contact()));
+    assert!(
+        world
+            .narrow_phase
+            .contact_pair(a, b)
+            .is_none_or(|p| !p.has_any_active_contact())
+    );
     world
         .colliders
         .set_parent(b, Some(second_body), &mut world.bodies);
     world.step();
-    assert!(world
-        .narrow_phase
-        .contact_pair(a, b)
-        .unwrap()
-        .has_any_active_contact());
+    assert!(
+        world
+            .narrow_phase
+            .contact_pair(a, b)
+            .unwrap()
+            .has_any_active_contact()
+    );
     assert_eq!(
         positions,
-        (*world.colliders[a].position(), *world.colliders[b].position())
+        (
+            *world.colliders[a].position(),
+            *world.colliders[b].position()
+        )
     );
 }
 
@@ -202,7 +211,8 @@ impl rapier3d::pipeline::EventHandler for CollisionEvents {
         _: &ColliderSet,
         _: &ContactPair,
         _: Real,
-    ) {}
+    ) {
+    }
 
     fn handle_soft_body_tear_event(&self, _: &SoftBodySet, _: &SoftBodyTearEvent) {}
 }
@@ -234,11 +244,13 @@ fn active_type_changes_rediscover_without_motion_and_keep_solver_filtered_events
             if sensor {
                 assert_eq!(world.narrow_phase.intersection_pair(a, b), Some(true));
             } else {
-                assert!(world
-                    .narrow_phase
-                    .contact_pair(a, b)
-                    .unwrap()
-                    .has_any_active_contact());
+                assert!(
+                    world
+                        .narrow_phase
+                        .contact_pair(a, b)
+                        .unwrap()
+                        .has_any_active_contact()
+                );
             }
             world.step_with_events(&(), &events);
             assert!(events.0.lock().unwrap().is_empty()); // No duplicate Started.
@@ -250,7 +262,10 @@ fn active_type_changes_rediscover_without_motion_and_keep_solver_filtered_events
         }
         assert_eq!(
             positions,
-            (*world.colliders[a].position(), *world.colliders[b].position())
+            (
+                *world.colliders[a].position(),
+                *world.colliders[b].position()
+            )
         );
     }
 }

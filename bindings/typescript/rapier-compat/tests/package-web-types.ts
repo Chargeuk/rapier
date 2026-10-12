@@ -28,14 +28,12 @@ world.integrationParameters.contactRecycling = true;
 world.integrationParameters.normalizedContactRecycleDistance = 0.0125;
 const contactClustering: boolean =
     world.integrationParameters.contactClustering;
-const contactRecycling: boolean =
-    world.integrationParameters.contactRecycling;
+const contactRecycling: boolean = world.integrationParameters.contactRecycling;
 const recycleDistance: number =
     world.integrationParameters.normalizedContactRecycleDistance;
 const rawClustering: boolean =
     world.integrationParameters.raw.contactClustering;
-const rawRecycling: boolean =
-    world.integrationParameters.raw.contactRecycling;
+const rawRecycling: boolean = world.integrationParameters.raw.contactRecycling;
 const rawRecycleDistance: number =
     world.integrationParameters.raw.normalizedContactRecycleDistance;
 // @ts-expect-error Contact flags require booleans.

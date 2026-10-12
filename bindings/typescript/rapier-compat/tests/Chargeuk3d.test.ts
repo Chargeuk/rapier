@@ -535,7 +535,10 @@ describe("Chargeuk 3D compatibility behaviour", () => {
             const defaults = unrelated();
             expect(params.contactClustering).toBe(true);
             expect(params.contactRecycling).toBe(true);
-            expect(params.normalizedContactRecycleDistance).toBeCloseTo(0.05, 6);
+            expect(params.normalizedContactRecycleDistance).toBeCloseTo(
+                0.05,
+                6,
+            );
             for (const clustering of [false, true]) {
                 for (const recycling of [false, true]) {
                     params.contactClustering = clustering;
@@ -544,11 +547,15 @@ describe("Chargeuk 3D compatibility behaviour", () => {
                         params.normalizedContactRecycleDistance = distance;
                         expect(params.raw.contactClustering).toBe(clustering);
                         expect(params.raw.contactRecycling).toBe(recycling);
-                        expect(params.raw.normalizedContactRecycleDistance).toBeCloseTo(distance, 6);
+                        expect(
+                            params.raw.normalizedContactRecycleDistance,
+                        ).toBeCloseTo(distance, 6);
                         world.step();
                         expect(params.contactClustering).toBe(clustering);
                         expect(params.contactRecycling).toBe(recycling);
-                        expect(params.normalizedContactRecycleDistance).toBeCloseTo(distance, 6);
+                        expect(
+                            params.normalizedContactRecycleDistance,
+                        ).toBeCloseTo(distance, 6);
                         expect(unrelated()).toEqual(defaults);
                     }
                 }
@@ -564,7 +571,9 @@ describe("Chargeuk 3D compatibility behaviour", () => {
             other.step();
             expect(other.integrationParameters.contactClustering).toBe(true);
             expect(other.integrationParameters.contactRecycling).toBe(true);
-            expect(other.integrationParameters.normalizedContactRecycleDistance).toBeCloseTo(0.05, 6);
+            expect(
+                other.integrationParameters.normalizedContactRecycleDistance,
+            ).toBeCloseTo(0.05, 6);
         } finally {
             other.free();
         }
