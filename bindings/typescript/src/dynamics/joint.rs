@@ -190,6 +190,25 @@ impl RawGenericJoint {
         )
     }
 
+    /// Builds one coupled linear spring motor with a radial distance limit.
+    pub fn springWithLimit(
+        rest_length: f32,
+        stiffness: f32,
+        damping: f32,
+        maximum_length: f32,
+        anchor1: &RawVector,
+        anchor2: &RawVector,
+    ) -> Self {
+        let mut joint = Self::spring(rest_length, stiffness, damping, anchor1, anchor2);
+        joint.0.set_limits(JointAxis::LinX, [0.0, maximum_length]);
+        // Zero gains otherwise become a hard velocity motor because the native
+        // inverse-zero coefficient is zero. Leave the distance limit active.
+        if stiffness == 0.0 && damping == 0.0 {
+            joint.0.set_motor_max_force(JointAxis::LinX, 0.0);
+        }
+        joint
+    }
+
     /// Create a new joint descriptor that builds spherical joints.
     ///
     /// A spherical joints allows three relative rotational degrees of freedom

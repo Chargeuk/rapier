@@ -404,8 +404,6 @@ export class FixedImpulseJoint extends ImpulseJoint {}
 
 export class RopeImpulseJoint extends ImpulseJoint {}
 
-export class SpringImpulseJoint extends ImpulseJoint {}
-
 export class PrismaticImpulseJoint extends UnitImpulseJoint {
     public rawAxis(): RawJointAxis {
         return RawJointAxis.LinX;
@@ -625,6 +623,140 @@ export class SphericalImpulseJoint extends ImpulseJoint {
 }
 // #endif
 
+// #if DIM3
+// Retain the generic motor API previously available on plain spring wrappers.
+const SpringImpulseJointBase = GenericImpulseJoint;
+// #endif
+// #if DIM2
+const SpringImpulseJointBase = ImpulseJoint;
+// #endif
+export class SpringImpulseJoint extends SpringImpulseJointBase {
+    /** The spring's target anchor distance, in metres. */
+    public restLength(): number {
+        return this.rawSet.jointMotorTargetPos(this.handle, RawJointAxis.LinX);
+    }
+
+    /** Spring stiffness in N/m (ForceBased). */
+    public stiffness(): number {
+        return this.rawSet.jointMotorStiffness(this.handle, RawJointAxis.LinX);
+    }
+
+    /** Spring damping in N s/m (ForceBased). */
+    public damping(): number {
+        return this.rawSet.jointMotorDamping(this.handle, RawJointAxis.LinX);
+    }
+
+    /** Whether a radial distance limit is enabled. */
+    public limitsEnabled(): boolean {
+        return this.rawSet.jointLimitsEnabled(this.handle, RawJointAxis.LinX);
+    }
+
+    /** Maximum anchor distance in metres, or undefined for an unlimited spring. */
+    public maximumLength(): number | undefined {
+        return this.limitsEnabled()
+            ? this.rawSet.jointLimitsMax(this.handle, RawJointAxis.LinX)
+            : undefined;
+    }
+
+    /**
+     * Updates the coupled ForceBased motor, with zero target velocity.
+     * Zero stiffness and damping disable motor force; nonzero gains restore
+     * the normal unbounded force cap. The distance limit remains active.
+     * Invalid parameters throw RangeError before changing the native joint.
+     * Wake the attached bodies when updating a sleeping spring.
+     */
+    public configureSpring(
+        restLength: number,
+        stiffness: number,
+        damping: number,
+    ) {
+        validateSpring(restLength, stiffness, damping);
+        this.requireValidSpring();
+        const maximumLength = this.maximumLength();
+        if (maximumLength !== undefined && Math.fround(restLength) > maximumLength) {
+            throw new RangeError("Spring restLength must not exceed maximumLength.");
+        }
+        this.rawSet.jointConfigureMotorModel(
+            this.handle,
+            RawJointAxis.LinX,
+            RawMotorModel.ForceBased,
+        );
+        this.rawSet.jointConfigureMotorPosition(
+            this.handle,
+            RawJointAxis.LinX,
+            restLength,
+            stiffness,
+            damping,
+        );
+        this.rawSet.jointSetMotorMaxForce(
+            this.handle,
+            RawJointAxis.LinX,
+            stiffness === 0 && damping === 0 ? 0 : 3.4028234663852886e38,
+        );
+    }
+
+    /**
+     * Enables/updates the coupled radial limit [0, maximumLength].
+     * The limit must be positive and at least the current rest length.
+     * Invalid parameters throw RangeError without changing the native joint.
+     */
+    public setMaximumLength(maximumLength: number) {
+        validateSpringNumber("maximumLength", maximumLength, true);
+        this.requireValidSpring();
+        validateMaximumLength(this.restLength(), Math.fround(maximumLength));
+        this.rawSet.jointSetLimits(
+            this.handle,
+            RawJointAxis.LinX,
+            0,
+            maximumLength,
+        );
+    }
+
+    private requireValidSpring() {
+        if (!this.isValid() || this.type() !== JointType.Spring) {
+            throw new Error("Cannot update a removed or non-spring joint.");
+        }
+    }
+}
+
+function validateSpringNumber(name: string, value: number, positive = false) {
+    validateSpringF32(name, value);
+    if (positive ? value <= 0 : value < 0) {
+        throw new RangeError(`Spring ${name} must be ${positive ? "positive" : "nonnegative"}.`);
+    }
+}
+
+function validateSpringF32(name: string, value: number) {
+    const rounded = Math.fround(value);
+    if (!Number.isFinite(value) || !Number.isFinite(rounded) || (value !== 0 && rounded === 0)) {
+        throw new RangeError(`Spring ${name} must be finite and representable as a nonzero f32 unless zero.`);
+    }
+}
+
+function validateSpring(restLength: number, stiffness: number, damping: number) {
+    validateSpringNumber("restLength", restLength);
+    validateSpringNumber("stiffness", stiffness);
+    validateSpringNumber("damping", damping);
+}
+
+function validateMaximumLength(restLength: number, maximumLength: number) {
+    validateSpringNumber("maximumLength", maximumLength, true);
+    if (maximumLength < restLength || Math.fround(maximumLength) < Math.fround(restLength)) {
+        throw new RangeError("Spring maximumLength must be at least restLength.");
+    }
+}
+
+function validateSpringAnchor(name: string, anchor: Vector) {
+    if (!anchor) {
+        throw new RangeError(`Spring ${name} must be a finite f32 vector.`);
+    }
+    validateSpringF32(`${name}.x`, anchor.x);
+    validateSpringF32(`${name}.y`, anchor.y);
+    // #if DIM3
+    validateSpringF32(`${name}.z`, anchor.z);
+    // #endif
+}
+
 export class JointData {
     anchor1: Vector;
     anchor2: Vector;
@@ -642,6 +774,8 @@ export class JointData {
     stiffness: number;
     damping: number;
     length: number;
+    /** Optional radial limit for a spring descriptor, in metres. */
+    maximumLength?: number;
 
     private constructor() {}
 
@@ -700,6 +834,32 @@ export class JointData {
         res.anchor2 = anchor2;
         res.length = length;
         res.jointType = JointType.Rope;
+        return res;
+    }
+
+    /**
+     * Creates one spring GenericJoint with a coupled radial distance limit.
+     * The ForceBased spring pulls/pushes toward restLength in every direction;
+     * the limit constrains anchor distance to [0, maximumLength]. Rotation is free.
+     * Lengths are in metres, stiffness in N/m, damping in N s/m.
+     * All parameters must be finite f32 values; restLength, stiffness and damping
+     * must be nonnegative, maximumLength positive and at least restLength.
+     * Anchors are expressed in each body's local space.
+     */
+    public static springWithLimit(
+        restLength: number,
+        stiffness: number,
+        damping: number,
+        maximumLength: number,
+        anchor1: Vector,
+        anchor2: Vector,
+    ): JointData {
+        validateSpring(restLength, stiffness, damping);
+        validateMaximumLength(restLength, maximumLength);
+        validateSpringAnchor("anchor1", anchor1);
+        validateSpringAnchor("anchor2", anchor2);
+        const res = JointData.spring(restLength, stiffness, damping, anchor1, anchor2);
+        res.maximumLength = maximumLength;
         return res;
     }
 
@@ -885,6 +1045,13 @@ export class JointData {
     // #endif
 
     public intoRaw(): RawGenericJoint {
+        // Descriptors are mutable: revalidate before any WASM allocation.
+        if (this.jointType === JointType.Spring && this.maximumLength !== undefined) {
+            validateSpring(this.length, this.stiffness, this.damping);
+            validateMaximumLength(this.length, this.maximumLength);
+            validateSpringAnchor("anchor1", this.anchor1);
+            validateSpringAnchor("anchor2", this.anchor2);
+        }
         let rawA1 = VectorOps.intoRaw(this.anchor1);
         let rawA2 = VectorOps.intoRaw(this.anchor2);
         let rawAx;
@@ -905,13 +1072,24 @@ export class JointData {
                 rawFra2.free();
                 break;
             case JointType.Spring:
-                result = RawGenericJoint.spring(
-                    this.length,
-                    this.stiffness,
-                    this.damping,
-                    rawA1,
-                    rawA2,
-                );
+                if (this.maximumLength === undefined) {
+                    result = RawGenericJoint.spring(
+                        this.length,
+                        this.stiffness,
+                        this.damping,
+                        rawA1,
+                        rawA2,
+                    );
+                } else {
+                    result = RawGenericJoint.springWithLimit(
+                        this.length,
+                        this.stiffness,
+                        this.damping,
+                        this.maximumLength,
+                        rawA1,
+                        rawA2,
+                    );
+                }
                 break;
             case JointType.Rope:
                 result = RawGenericJoint.rope(this.length, rawA1, rawA2);

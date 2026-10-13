@@ -10,6 +10,7 @@ import {
     MotorModel,
     RevoluteImpulseJoint,
     RigidBodyDesc,
+    SpringImpulseJoint,
     World,
 } from "@chargeuk/rapier3d-compat";
 
@@ -173,6 +174,26 @@ async function consumer() {
         generic.configureMotorModel(MotorModel.AccelerationBased);
         // @ts-expect-error The force/torque cap is numeric.
         generic.setMotorMaxForce(JointAxis.LinX, "5");
+        const springData: JointData = JointData.springWithLimit(
+            0, 80, 18, 1, anchor, anchor,
+        );
+        const spring = world.createImpulseJoint(
+            springData, body1, body2, true,
+        ) as SpringImpulseJoint;
+        const springResult: void = spring.configureSpring(0.5, 40, 12);
+        const limitResult: void = spring.setMaximumLength(2);
+        const restLength: number = spring.restLength();
+        const stiffness: number = spring.stiffness();
+        const damping: number = spring.damping();
+        const maximumLength: number | undefined = spring.maximumLength();
+        const limitEnabled: boolean = spring.limitsEnabled();
+        // @ts-expect-error Spring gains require numbers.
+        spring.configureSpring(0, "80", 18);
+        // @ts-expect-error Maximum length requires a number.
+        spring.setMaximumLength("2");
+        // @ts-expect-error Creation requires both local anchors.
+        JointData.springWithLimit(0, 80, 18, 1, anchor);
+        void [springResult, limitResult, restLength, stiffness, damping, maximumLength, limitEnabled];
         world.step();
     } finally {
         world.free();

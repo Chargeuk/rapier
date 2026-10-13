@@ -1,7 +1,7 @@
 use crate::dynamics::{RawImpulseJointSet, RawJointAxis, RawJointType, RawMotorModel};
 use crate::math::{RawRotation, RawVector};
 use crate::utils::{self, FlatHandle};
-use rapier::dynamics::JointAxis;
+use rapier::dynamics::{JointAxesMask, JointAxis};
 use rapier::math::Pose;
 use wasm_bindgen::prelude::*;
 
@@ -9,7 +9,18 @@ use wasm_bindgen::prelude::*;
 impl RawImpulseJointSet {
     /// The type of this joint.
     pub fn jointType(&self, handle: FlatHandle) -> RawJointType {
-        self.map(handle, |j| j.data.locked_axes.into())
+        self.map(handle, |j| {
+            // Spring and rope descriptors both have no locked axes. Identify
+            // springs by their coupled distance motor, including after restore.
+            if j.data.locked_axes.is_empty()
+                && j.data.coupled_axes == JointAxesMask::LIN_AXES
+                && j.data.motor_axes == JointAxesMask::LIN_X
+            {
+                RawJointType::Spring
+            } else {
+                j.data.locked_axes.into()
+            }
+        })
     }
 
     /// The unique integer identifier of the first rigid-body this joint it attached to.
@@ -186,6 +197,18 @@ impl RawImpulseJointSet {
         self.map_mut(handle, |j| {
             j.data.set_limits(axis.into(), [min, max]);
         });
+    }
+
+    pub fn jointMotorTargetPos(&self, handle: FlatHandle, axis: RawJointAxis) -> f32 {
+        self.map(handle, |j| j.data.motors[axis as usize].target_pos)
+    }
+
+    pub fn jointMotorStiffness(&self, handle: FlatHandle, axis: RawJointAxis) -> f32 {
+        self.map(handle, |j| j.data.motors[axis as usize].stiffness)
+    }
+
+    pub fn jointMotorDamping(&self, handle: FlatHandle, axis: RawJointAxis) -> f32 {
+        self.map(handle, |j| j.data.motors[axis as usize].damping)
     }
 
     pub fn jointConfigureMotorModel(

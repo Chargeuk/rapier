@@ -150,6 +150,66 @@ function assertGenericMotorContract(R) {
     }
 }
 
+function assertSpringWithLimitContract(R) {
+    assert.equal(typeof R.JointData.springWithLimit, "function");
+    assert.equal(typeof R.SpringImpulseJoint, "function");
+    for (const direction of [
+        {x: 1, y: 0, z: 0},
+        {x: 0, y: -1, z: 0},
+        {x: 0, y: 0, z: 1},
+        {x: -0.6, y: 0, z: 0.8},
+    ]) {
+        const world = new R.World({x: 0, y: 0, z: 0});
+        try {
+            world.timestep = 1 / 120;
+            const zero = {x: 0, y: 0, z: 0};
+            const parent = world.createRigidBody(R.RigidBodyDesc.fixed());
+            const body = world.createRigidBody(
+                R.RigidBodyDesc.dynamic()
+                    .setCanSleep(false)
+                    .setTranslation(direction.x, direction.y, direction.z),
+            );
+            world.createCollider(R.ColliderDesc.ball(0.1).setMass(1), body);
+            const joint = world.createImpulseJoint(
+                R.JointData.springWithLimit(0.5, 20, 1, 1.5, zero, zero),
+                parent, body, true,
+            );
+            assert(joint instanceof R.SpringImpulseJoint);
+            assert(joint instanceof R.GenericImpulseJoint);
+            assert.equal(joint.type(), R.JointType.Spring);
+            assert.equal(world.impulseJoints.len(), 1);
+            assert.equal(joint.maximumLength(), 1.5);
+            body.setLinvel({x: direction.x * 20, y: direction.y * 20, z: direction.z * 20}, true);
+            let farthest = 0;
+            for (let i = 0; i < 120; i += 1) {
+                world.step();
+                const p = body.translation();
+                farthest = Math.max(farthest, Math.hypot(p.x, p.y, p.z));
+            }
+            assert(farthest > 1.4 && farthest < 1.55, `radial stop: ${farthest}`);
+            const handle = joint.handle;
+            joint.configureSpring(0, 80, 18);
+            joint.setMaximumLength(2);
+            for (let i = 0; i < 600; i += 1) world.step();
+            const p = body.translation();
+            assert(Math.hypot(p.x, p.y, p.z) < 0.005, "spring must restore toward zero rest length");
+            assert.equal(joint.restLength(), 0);
+            assert.equal(joint.stiffness(), 80);
+            assert.equal(joint.damping(), 18);
+            assert.equal(joint.maximumLength(), 2);
+            const before = world.takeSnapshot();
+            assert.throws(() => joint.configureSpring(3, 80, 18), RangeError);
+            assert.throws(() => joint.configureSpring(0, Infinity, 18), RangeError);
+            assert.throws(() => joint.setMaximumLength(0), RangeError);
+            assert.deepEqual(world.takeSnapshot(), before);
+            assert.equal(joint.handle, handle);
+            assert.equal(world.impulseJoints.len(), 1);
+        } finally {
+            world.free();
+        }
+    }
+}
+
 function assertContactParameterContract(R) {
     const world = new R.World({x: 0, y: 0, z: 0});
     const other = new R.World({x: 0, y: 0, z: 0});
@@ -226,7 +286,7 @@ async function main() {
         ),
     );
     assert.equal(pack.name, "@chargeuk/rapier3d-compat");
-    assert.equal(pack.version, "0.21.0-chargeuk.5");
+    assert.equal(pack.version, "0.21.0-chargeuk.6");
     assert.equal(pack.integrity, dry.integrity);
     for (const file of [
         "package.json",
@@ -313,6 +373,7 @@ async function main() {
     assert.equal(cjs.version(), "0.21.0"); // Internal binding version is unchanged.
     assertSphericalMotorContract(cjs);
     assertGenericMotorContract(cjs);
+    assertSpringWithLimitContract(cjs);
     assertContactParameterContract(cjs);
     for (const name of [
         "World",
@@ -355,11 +416,14 @@ async function main() {
         assert.deepEqual(Object.keys(Web).sort(), Object.keys(R.default).sort());
         ${assertSphericalMotorContract.toString()}
         ${assertGenericMotorContract.toString()}
+        ${assertSpringWithLimitContract.toString()}
         ${assertContactParameterContract.toString()}
         assertSphericalMotorContract(R);
         assertSphericalMotorContract(Web);
         assertGenericMotorContract(R);
         assertGenericMotorContract(Web);
+        assertSpringWithLimitContract(R);
+        assertSpringWithLimitContract(Web);
         assertContactParameterContract(R);
         assertContactParameterContract(Web);
         const world = new R.World({x: 0, y: 0, z: 0});
@@ -416,6 +480,7 @@ async function main() {
                 "ESM",
                 "spherical-wrapper-and-three-axis-motors-CJS-ESM-web",
                 "generic-wrapper-and-world-axis-motors-CJS-ESM-web",
+                "spring-motor-and-radial-limit-CJS-ESM-web",
                 "contact-parameters-defaults-roundtrip-isolation-CJS-ESM-web",
                 "web-loading",
                 "TypeScript-root-and-web",
